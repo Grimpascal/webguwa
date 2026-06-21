@@ -6,7 +6,9 @@ export function getAssetUrl(path: string | null | undefined): string {
     return path;
   }
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  return `${API_BASE_URL}${cleanPath}`;
+  // Clean index.php from base URL if present for static assets
+  const assetBaseUrl = API_BASE_URL.replace(/\/index\.php\/?$/, '');
+  return `${assetBaseUrl}${cleanPath}`;
 }
 
 export interface Game {

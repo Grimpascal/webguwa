@@ -3,8 +3,25 @@
 import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { api, Game, Product, Voucher } from '@/services/api';
+import { api, Game, Product, Voucher, getAssetUrl } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+
+const getValidatorGameName = (code: string): string | null => {
+  const c = (code || '').toUpperCase();
+  if (c.includes('MLBB') || c.includes('MOBILE_LEGEND') || c.includes('MOBILELEGEND')) return 'mobilelegends';
+  if (c.includes('FREEFIRE') || c.includes('FREE_FIRE') || c === 'FF') return 'freefire';
+  if (c.includes('PUBG')) return 'pubgm';
+  if (c.includes('CODM') || c.includes('CALL_OF_DUTY') || c.includes('CALLOFDUTY')) return 'codm';
+  if (c.includes('GENSHIN')) return 'genshinimpact';
+  if (c.includes('STARRAIL') || c.includes('STAR_RAIL') || c === 'HSR') return 'honkaistarrail';
+  if (c.includes('HONKAI') && c.includes('IMPACT')) return 'honkaiimpact';
+  if (c.includes('SAUSAGE')) return 'sausageman';
+  if (c.includes('AOV') || c.includes('VALOR')) return 'arenaofvalor';
+  if (c.includes('WILDRIFT') || c.includes('WILD_RIFT')) return 'lolwildrift';
+  if (c.includes('FC') && c.includes('MOBILE')) return 'fcmobile';
+  if (c.includes('CLASH') && c.includes('ROYALE')) return 'clashroyale';
+  return null;
+};
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -18,6 +35,11 @@ export default function GameDetail({ params }: PageProps) {
   const [game, setGame] = useState<Game | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  
+  // Nickname validation states
+  const [checkingNickname, setCheckingNickname] = useState(false);
+  const [validatedNickname, setValidatedNickname] = useState<string | null>(null);
+  const [nicknameError, setNicknameError] = useState<string | null>(null);
   
   // Form states
   const [targetId, setTargetId] = useState('');
@@ -37,6 +59,10 @@ export default function GameDetail({ params }: PageProps) {
   const [voucherError, setVoucherError] = useState(false);
   const [checkingVoucher, setCheckingVoucher] = useState(false);
 
+  // Flash sale timer state
+  const [timeRemaining, setTimeRemaining] = useState('');
+  const [showInstructions, setShowInstructions] = useState(false);
+
   // Clear voucher when changing product selection
   useEffect(() => {
     setVoucherCode('');
@@ -44,6 +70,57 @@ export default function GameDetail({ params }: PageProps) {
     setDiscountAmount(0);
     setVoucherMessage('');
   }, [selectedProductId]);
+
+  // Auto-verify game nickname when target ID or zone changes (debounced by 1s)
+  useEffect(() => {
+    const validatorGame = getValidatorGameName(game?.code || '');
+    if (!validatorGame) {
+      setValidatedNickname(null);
+      setNicknameError(null);
+      return;
+    }
+
+    if (!targetId.trim()) {
+      setValidatedNickname(null);
+      setNicknameError(null);
+      return;
+    }
+
+    if (validatorGame === 'mobilelegends' && !targetZone.trim()) {
+      setValidatedNickname(null);
+      setNicknameError(null);
+      return;
+    }
+
+    setCheckingNickname(true);
+    setValidatedNickname(null);
+    setNicknameError(null);
+
+    const delayDebounceFn = setTimeout(async () => {
+      try {
+        let url = `https://cek-username.onrender.com/game/${validatorGame}?uid=${targetId.trim()}`;
+        if (validatorGame === 'mobilelegends') {
+          url += `&zone=${targetZone.trim()}`;
+        }
+        
+        const res = await fetch(url);
+        const json = await res.json();
+        
+        if (json.message === 'Success' && json.data) {
+          setValidatedNickname(json.data);
+        } else {
+          setNicknameError('Data akun tidak ditemukan.');
+        }
+      } catch (err) {
+        console.error('Failed to verify nickname:', err);
+        setNicknameError('Gagal memverifikasi.');
+      } finally {
+        setCheckingNickname(false);
+      }
+    }, 1000);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [targetId, targetZone, game?.code]);
 
   // Alert modal state
   const [alertModal, setAlertModal] = useState<{
@@ -115,6 +192,39 @@ export default function GameDetail({ params }: PageProps) {
     loadGame();
   }, [slug]);
 
+  useEffect(() => {
+    if (!game?.flash_sale_end) {
+      setTimeRemaining('');
+      return;
+    }
+
+    const end = new Date(game.flash_sale_end).getTime();
+
+    const updateTimer = () => {
+      const now = new Date().getTime();
+      const diff = end - now;
+
+      if (diff <= 0) {
+        setTimeRemaining('');
+        return;
+      }
+
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+      const hStr = hours.toString().padStart(2, '0');
+      const mStr = minutes.toString().padStart(2, '0');
+      const sStr = seconds.toString().padStart(2, '0');
+
+      setTimeRemaining(`${hStr}:${mStr}:${sStr}`);
+    };
+
+    updateTimer();
+    const timer = setInterval(updateTimer, 1000);
+    return () => clearInterval(timer);
+  }, [game?.flash_sale_end]);
+
   const formatCurrency = (val: string | number) => {
     const num = typeof val === 'string' ? parseFloat(val) : val;
     return new Intl.NumberFormat('id-ID', {
@@ -122,6 +232,14 @@ export default function GameDetail({ params }: PageProps) {
       currency: 'IDR',
       minimumFractionDigits: 0,
     }).format(num);
+  };
+
+  const getProductPrice = (product: Product | null | undefined): number => {
+    if (!product) return 0;
+    if (timeRemaining && product.flash_sale_price) {
+      return parseFloat(product.flash_sale_price);
+    }
+    return parseFloat(product.price);
   };
 
   const handleApplyVoucher = async (e: React.MouseEvent) => {
@@ -144,7 +262,7 @@ export default function GameDetail({ params }: PageProps) {
     setVoucherError(false);
 
     try {
-      const res = await api.checkVoucher(voucherCode, parseFloat(selectedProduct.price));
+      const res = await api.checkVoucher(voucherCode, getProductPrice(selectedProduct));
       if (res.success) {
         setAppliedVoucher(res.voucher || null);
         setDiscountAmount(res.discount);
@@ -166,6 +284,8 @@ export default function GameDetail({ params }: PageProps) {
       setCheckingVoucher(false);
     }
   };
+
+
 
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -198,6 +318,7 @@ export default function GameDetail({ params }: PageProps) {
         product_id: selectedProductId,
         target_id: targetId,
         target_zone: targetZone || undefined,
+        nickname: validatedNickname || undefined,
         payment_method: selectedPayment,
         voucher_code: appliedVoucher ? appliedVoucher.code : undefined,
       });
@@ -245,9 +366,19 @@ export default function GameDetail({ params }: PageProps) {
     );
   }
 
+  const activeFlashSale = !!timeRemaining;
   const selectedProduct = game.products?.find((p) => p.id === selectedProductId);
+  const selectedProductPrice = selectedProduct ? getProductPrice(selectedProduct) : 0;
   const isSaldo = selectedPayment === 'SALDO';
-  const balanceInsufficient = isSaldo && user && selectedProduct && (parseFloat(user.balance) < (parseFloat(selectedProduct.price) - discountAmount));
+  const balanceInsufficient = isSaldo && user && selectedProduct && (parseFloat(user.balance) < (selectedProductPrice - discountAmount));
+
+  const sortedProducts = game.products ? [...game.products].sort((a, b) => {
+    const aIsFlash = activeFlashSale && !!a.flash_sale_price;
+    const bIsFlash = activeFlashSale && !!b.flash_sale_price;
+    if (aIsFlash && !bIsFlash) return -1;
+    if (!aIsFlash && bIsFlash) return 1;
+    return parseFloat(a.price) - parseFloat(b.price);
+  }) : [];
 
   return (
     <div className="bg-slate-50 py-8 min-h-screen">
@@ -258,34 +389,70 @@ export default function GameDetail({ params }: PageProps) {
           </Link>
         </div>
 
+        {timeRemaining && (
+          <div className="bg-gradient-to-r from-purple-700 via-pink-600 to-orange-500 text-white p-4 sm:p-5 rounded-2xl shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 relative overflow-hidden text-center sm:text-left animate-in fade-in slide-in-from-top-4 duration-300">
+            <div className="absolute right-0 bottom-0 w-36 h-36 bg-white/5 rounded-full blur-2xl -mr-10 -mb-10 pointer-events-none" />
+            <div className="flex flex-col sm:flex-row items-center gap-3 relative z-10">
+              <div className="text-3xl animate-bounce">🔥</div>
+              <div>
+                <h3 className="font-black text-base sm:text-lg font-heading tracking-tight uppercase leading-none">FLASH SALE KILAT</h3>
+                <p className="text-[10px] sm:text-[11px] text-white/80 font-medium mt-1.5 sm:mt-1">Dapatkan harga promo top-up game termurah hari ini!</p>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row items-center gap-2 relative z-10 shrink-0">
+              <span className="text-[10px] sm:text-xs uppercase font-extrabold tracking-wider bg-black/20 px-2.5 py-1 rounded-lg">Berakhir Dalam:</span>
+              <div className="flex items-center font-mono font-black text-lg sm:text-xl bg-black/40 px-3.5 py-1.5 rounded-xl border border-white/10 tracking-widest shadow-md">
+                {timeRemaining}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left Column: Game Details Instructions */}
           <div className="lg:col-span-1">
-            <div className="sticky top-24 bg-white border border-border p-6 rounded-2xl shadow-sm">
-              {game.thumbnail ? (
-                <img
-                  src={`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'}${game.thumbnail}`}
-                  alt={game.name}
-                  className="w-20 h-20 rounded-2xl object-cover mb-4 shadow-md border border-slate-200"
-                />
-              ) : (
-                <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-primary to-cyan-500 flex items-center justify-center text-white font-extrabold text-3xl mb-4 shadow-md">
-                  {game.code.slice(0, 4)}
+            <div className="sticky top-24 bg-white border border-border p-5 sm:p-6 rounded-2xl shadow-sm">
+              <div className="flex flex-row lg:flex-col items-center lg:items-start gap-4 lg:gap-0">
+                {game.thumbnail ? (
+                  <img
+                    src={getAssetUrl(game.thumbnail)}
+                    alt={game.name}
+                    className="w-14 h-14 lg:w-20 lg:h-20 rounded-2xl object-cover lg:mb-4 shadow-md border border-slate-200 shrink-0"
+                  />
+                ) : (
+                  <div className="w-14 h-14 lg:w-20 lg:h-20 rounded-2xl bg-gradient-to-tr from-primary to-cyan-500 flex items-center justify-center text-white font-extrabold text-2xl lg:text-3xl lg:mb-4 shadow-md shrink-0">
+                    {game.code.slice(0, 4)}
+                  </div>
+                )}
+                <div>
+                  <h1 className="text-xl lg:text-2xl font-extrabold font-heading text-foreground">{game.name}</h1>
+                  <p className="text-[10px] lg:text-xs text-primary font-bold mt-0.5 lg:mt-1 uppercase tracking-widest">Layanan Instan &bull; 24/7 Otomatis</p>
                 </div>
-              )}
-              <h1 className="text-2xl font-extrabold font-heading text-foreground">{game.name}</h1>
-              <p className="text-xs text-primary font-bold mt-1 uppercase tracking-widest">Layanan Instan</p>
+              </div>
               
-              <div className="border-t border-border mt-6 pt-6 text-sm text-foreground/75 leading-relaxed space-y-4">
-                <p className="font-semibold text-foreground/90">Cara Top Up:</p>
-                <ol className="list-decimal pl-5 space-y-2 text-xs text-foreground/60">
-                  <li>Masukkan data ID akun Anda sesuai kolom input.</li>
-                  <li>Pilih nominal Diamond/UC yang diinginkan.</li>
-                  <li>Pilih metode pembayaran yang Anda inginkan.</li>
-                  <li>Masukkan nomor WhatsApp (opsional).</li>
-                  <li>Klik tombol **Beli Sekarang**.</li>
-                  <li>Lakukan pembayaran pada halaman tagihan, lalu item akan masuk secara otomatis.</li>
-                </ol>
+              <div className="border-t border-border mt-5 pt-5">
+                <button
+                  type="button"
+                  onClick={() => setShowInstructions(!showInstructions)}
+                  className="w-full flex lg:hidden items-center justify-between text-xs font-black text-foreground/80 hover:text-primary transition-colors cursor-pointer uppercase tracking-wider"
+                >
+                  <span>Cara Top Up</span>
+                  <svg className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${showInstructions ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                
+                <div className={`mt-4 lg:mt-0 space-y-4 lg:block ${showInstructions ? 'block animate-fadeIn' : 'hidden'}`}>
+                  <p className="hidden lg:block font-bold text-foreground/90 text-sm">Cara Top Up:</p>
+                  <ol className="list-decimal pl-5 space-y-2 text-xs text-foreground/60 leading-relaxed font-medium">
+                    <li>Masukkan data ID akun Anda sesuai kolom input.</li>
+                    <li>Pilih nominal Diamond/UC yang diinginkan.</li>
+                    <li>Pilih metode pembayaran yang Anda inginkan.</li>
+                    <li>Masukkan nomor WhatsApp (opsional).</li>
+                    <li>Klik tombol **Beli Sekarang**.</li>
+                    <li>Lakukan pembayaran pada halaman tagihan, lalu item akan masuk secara otomatis.</li>
+                  </ol>
+                </div>
               </div>
             </div>
           </div>
@@ -332,6 +499,29 @@ export default function GameDetail({ params }: PageProps) {
                     </div>
                   )}
                 </div>
+                {getValidatorGameName(game.code) && (
+                  <div className="mt-3.5 flex flex-wrap items-center gap-3 text-xs min-h-[1.75rem]">
+                    {checkingNickname && (
+                      <span className="text-foreground/50 flex items-center gap-1.5 animate-pulse font-medium bg-slate-50 border border-slate-200/50 px-3 py-2 rounded-xl shadow-inner">
+                        <svg className="animate-spin h-3.5 w-3.5 text-primary" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Memverifikasi ID akun...
+                      </span>
+                    )}
+                    {validatedNickname && !checkingNickname && (
+                      <span className="text-success font-bold flex items-center gap-1 bg-success/5 border border-success/15 px-3 py-2 rounded-xl shadow-xs">
+                        ✓ Nickname: <strong className="text-foreground">{validatedNickname}</strong>
+                      </span>
+                    )}
+                    {nicknameError && !checkingNickname && (
+                      <span className="text-error font-semibold flex items-center gap-1 bg-error/5 border border-error/15 px-3 py-2 rounded-xl shadow-xs">
+                        ✗ {nicknameError}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <p className="text-[10px] text-foreground/40 mt-3 italic">
                   *Kesalahan penulisan data ID akun diluar tanggung jawab kami. Mohon teliti kembali.
                 </p>
@@ -345,35 +535,44 @@ export default function GameDetail({ params }: PageProps) {
                   <h3 className="font-extrabold text-foreground text-base font-heading">Pilih Nominal Top Up</h3>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  {game.products && game.products.length > 0 ? (
-                    game.products.map((product) => {
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+                  {sortedProducts && sortedProducts.length > 0 ? (
+                    sortedProducts.map((product) => {
                       const isSelected = selectedProductId === product.id;
+                      const isFlashProduct = activeFlashSale && !!product.flash_sale_price;
+                      const productPrice = isFlashProduct ? parseFloat(product.flash_sale_price!) : parseFloat(product.price);
+                      const originalPrice = parseFloat(product.price);
+                      
                       return (
                         <button
                           key={product.id}
                           type="button"
                           onClick={() => setSelectedProductId(product.id)}
-                          className={`text-left p-4 rounded-xl border text-sm font-medium transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between h-28 ${
+                          className={`text-left p-3 sm:p-4 rounded-xl border text-xs sm:text-sm font-medium transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between min-h-[6.5rem] lg:min-h-[7rem] ${
                             isSelected
                               ? 'border-primary bg-primary-light/30 ring-2 ring-primary/10'
                               : 'border-slate-100 bg-slate-50 hover:bg-slate-100 hover:border-slate-200'
                           }`}
                         >
+                          {isFlashProduct && (
+                            <div className="absolute top-0 right-0 bg-gradient-to-l from-orange-500 to-pink-600 text-white text-[9px] font-black px-2 py-0.5 rounded-bl-lg shadow-sm leading-none z-10">
+                              🔥 FLASH
+                            </div>
+                          )}
                           <div>
-                            <p className={`font-bold text-xs ${isSelected ? 'text-primary font-bold' : 'text-foreground/80'}`}>
+                            <p className={`font-bold text-[11px] sm:text-xs leading-snug ${isSelected ? 'text-primary' : 'text-foreground/80'}`}>
                               {product.name}
                             </p>
                           </div>
                           <div className="mt-2">
-                            {/* Price crossed out if discounted */}
-                            {parseFloat(product.original_price) > 0 && parseFloat(product.original_price) < parseFloat(product.price) && (
-                              <p className="text-[10px] text-foreground/30 line-through">
-                                {formatCurrency(product.price)}
+                            {/* Price crossed out if flash sale */}
+                            {isFlashProduct && (
+                              <p className="text-[10px] text-foreground/30 line-through leading-none mb-0.5">
+                                {formatCurrency(originalPrice)}
                               </p>
                             )}
-                            <p className={`font-extrabold text-sm ${isSelected ? 'text-primary font-black' : 'text-foreground/90'}`}>
-                              {formatCurrency(product.price)}
+                            <p className={`font-extrabold text-sm ${isSelected ? 'text-primary font-black' : 'text-foreground/90'} ${isFlashProduct ? 'text-[#e11d48]' : ''}`}>
+                              {formatCurrency(productPrice)}
                             </p>
                           </div>
                         </button>
@@ -421,10 +620,10 @@ export default function GameDetail({ params }: PageProps) {
                                 <p className="text-[10px] text-foreground/40 mt-0.5">Sisa Saldo: {formatCurrency(user.balance)}</p>
                               </div>
                             </div>
-                            {totalPay > 0 && (
+                            {selectedProductPrice > 0 && (
                               <div className="text-right">
                                 <p className="text-[9px] text-foreground/40">Total bayar</p>
-                                <p className={`font-extrabold text-xs ${isSelected ? 'text-primary' : 'text-foreground/80'}`}>{formatCurrency(totalPay)}</p>
+                                <p className={`font-extrabold text-xs ${isSelected ? 'text-primary' : 'text-foreground/80'}`}>{formatCurrency(selectedProductPrice)}</p>
                               </div>
                             )}
                           </button>
@@ -482,7 +681,7 @@ export default function GameDetail({ params }: PageProps) {
                         {eWalletMethods.map((pm) => {
                           const isSelected = selectedPayment === pm.id;
                           const totalPay = selectedProduct 
-                            ? parseFloat(selectedProduct.price) + pm.fee
+                            ? getProductPrice(selectedProduct) + pm.fee
                             : 0;
 
                           return (
@@ -560,7 +759,7 @@ export default function GameDetail({ params }: PageProps) {
                         {bankMethods.map((pm) => {
                           const isSelected = selectedPayment === pm.id;
                           const totalPay = selectedProduct 
-                            ? parseFloat(selectedProduct.price) + pm.fee
+                            ? getProductPrice(selectedProduct) + pm.fee
                             : 0;
 
                           return (
@@ -658,6 +857,12 @@ export default function GameDetail({ params }: PageProps) {
                       <span className="font-bold text-foreground/80">{targetId} {targetZone && `(${targetZone})`}</span>
                     </div>
                   )}
+                  {validatedNickname && (
+                    <div className="flex justify-between text-success">
+                      <span>Nickname Terverifikasi:</span>
+                      <span className="font-bold">{validatedNickname}</span>
+                    </div>
+                  )}
                   {selectedProduct && (
                     <div className="flex justify-between">
                       <span>Item:</span>
@@ -666,8 +871,21 @@ export default function GameDetail({ params }: PageProps) {
                   )}
                   {selectedProduct && (
                     <div className="flex justify-between">
-                      <span>Harga Normal:</span>
-                      <span className="font-bold text-foreground/80">{formatCurrency(selectedProduct.price)}</span>
+                      <span>Harga:</span>
+                      <span className="font-bold text-foreground/80">
+                        {activeFlashSale && selectedProduct.flash_sale_price ? (
+                          <>
+                            <span className="text-xs text-foreground/30 line-through mr-1.5 font-normal">
+                              {formatCurrency(parseFloat(selectedProduct.price))}
+                            </span>
+                            <span className="text-[#e11d48] font-extrabold">
+                              {formatCurrency(parseFloat(selectedProduct.flash_sale_price))}
+                            </span>
+                          </>
+                        ) : (
+                          formatCurrency(parseFloat(selectedProduct.price))
+                        )}
+                      </span>
                     </div>
                   )}
                   {discountAmount > 0 && (
@@ -708,7 +926,7 @@ export default function GameDetail({ params }: PageProps) {
                   {submitting ? (
                     <span>Memproses Transaksi...</span>
                   ) : (
-                    <span>Beli Sekarang &bull; {selectedProduct ? formatCurrency(parseFloat(selectedProduct.price) - discountAmount + (availablePaymentMethods.find(m => m.id === selectedPayment)?.fee || 0)) : 'Pilih Item'}</span>
+                    <span>Beli Sekarang &bull; {selectedProduct ? formatCurrency(selectedProductPrice - discountAmount + (availablePaymentMethods.find(m => m.id === selectedPayment)?.fee || 0)) : 'Pilih Item'}</span>
                   )}
                 </button>
               </div>

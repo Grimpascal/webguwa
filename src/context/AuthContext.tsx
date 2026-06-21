@@ -25,9 +25,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
-    // Load token from localStorage
-    const savedToken = localStorage.getItem('token');
-    const savedUser = localStorage.getItem('user');
+    // Load token from localStorage or sessionStorage
+    let savedToken = localStorage.getItem('token');
+    let savedUser = localStorage.getItem('user');
+
+    if (!savedToken || !savedUser) {
+      savedToken = sessionStorage.getItem('token');
+      savedUser = sessionStorage.getItem('user');
+    }
 
     if (savedToken && savedUser) {
       setToken(savedToken);
@@ -37,7 +42,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       api.me()
         .then((userData) => {
           setUser(userData);
-          localStorage.setItem('user', JSON.stringify(userData));
+          if (localStorage.getItem('token')) {
+            localStorage.setItem('user', JSON.stringify(userData));
+          } else {
+            sessionStorage.setItem('user', JSON.stringify(userData));
+          }
         })
         .catch(() => {
           // Token expired or invalid, clear
@@ -54,6 +63,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logoutLocal = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('user');
     setUser(null);
     setToken(null);
   };
@@ -61,11 +72,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (credentials: any) => {
     setLoading(true);
     try {
-      const res = await api.login(credentials);
+      const { rememberMe, ...loginPayload } = credentials;
+      const res = await api.login(loginPayload);
       if (res.success && res.data) {
         const { token: userToken, user: userData } = res.data;
-        localStorage.setItem('token', userToken);
-        localStorage.setItem('user', JSON.stringify(userData));
+        if (rememberMe) {
+          localStorage.setItem('token', userToken);
+          localStorage.setItem('user', JSON.stringify(userData));
+        } else {
+          sessionStorage.setItem('token', userToken);
+          sessionStorage.setItem('user', JSON.stringify(userData));
+        }
         setToken(userToken);
         setUser(userData);
         

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use } from 'react';
 import Link from 'next/link';
-import { api, Transaction } from '@/services/api';
+import { api, Transaction, getAssetUrl } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 
 interface PageProps {
@@ -297,8 +297,8 @@ export default function InvoiceDetail({ params }: PageProps) {
                   )}
                   {transaction.delivery_status === 'processing' && (
                     <>
-                      <p className="font-bold text-primary">Proses Pengiriman via Digiflazz</p>
-                      <p className="text-foreground/40 mt-0.5">Menunggu konfirmasi sukses dari API Digiflazz.</p>
+                      <p className="font-bold text-primary">Proses Pengiriman Otomatis</p>
+                      <p className="text-foreground/40 mt-0.5">Pesanan sedang diproses oleh sistem.</p>
                     </>
                   )}
                   {transaction.delivery_status === 'failed' && (
@@ -329,7 +329,7 @@ export default function InvoiceDetail({ params }: PageProps) {
                   <div className="flex items-center space-x-2 font-bold text-foreground/80">
                     {transaction.game?.thumbnail ? (
                       <img
-                        src={`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'}${transaction.game.thumbnail}`}
+                        src={getAssetUrl(transaction.game.thumbnail)}
                         alt={transaction.game.name}
                         className="w-6 h-6 rounded-md object-cover border border-slate-200"
                       />
@@ -347,6 +347,12 @@ export default function InvoiceDetail({ params }: PageProps) {
                     {transaction.target_id} {transaction.target_zone && `(${transaction.target_zone})`}
                   </span>
                 </div>
+                {transaction.nickname && (
+                  <div className="flex justify-between text-success">
+                    <span className="text-foreground/50">Nickname Akun:</span>
+                    <span className="font-extrabold">{transaction.nickname}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-foreground/50">Metode Pembayaran:</span>
                   <span className="font-bold text-foreground/80">{getFriendlyPaymentName(transaction.payment_method)}</span>
@@ -395,7 +401,7 @@ export default function InvoiceDetail({ params }: PageProps) {
             </h4>
             <p className="text-xs text-amber-700/80 mb-4 max-w-md mx-auto">
               Karena Anda berada dalam mode demo, gunakan tombol di bawah ini untuk mensimulasikan pembayaran lunas. 
-              Ini akan memicu status transaksi menjadi <strong>Paid</strong> dan menjalankan request order Digiflazz.
+              Ini akan memicu status transaksi menjadi <strong>Paid</strong> dan menjalankan proses pengiriman otomatis.
             </p>
             <button
               onClick={handleSimulatePayment}

@@ -1,4 +1,13 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+
+export function getAssetUrl(path: string | null | undefined): string {
+  if (!path) return '';
+  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) {
+    return path;
+  }
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${API_BASE_URL}${cleanPath}`;
+}
 
 export interface Game {
   id: number;
@@ -8,6 +17,7 @@ export interface Game {
   thumbnail: string | null;
   input_placeholder: string;
   is_active: boolean;
+  flash_sale_end?: string | null;
   products?: Product[];
 }
 
@@ -21,6 +31,7 @@ export interface Product {
   is_available: boolean;
   markup_type: 'global' | 'percent' | 'flat';
   markup_value: string;
+  flash_sale_price?: string | null;
 }
 
 export interface Transaction {
@@ -30,6 +41,7 @@ export interface Transaction {
   product_id: number;
   target_id: string;
   target_zone: string | null;
+  nickname?: string | null;
   payment_method: string;
   payment_status: 'pending' | 'paid' | 'failed' | 'expired';
   delivery_status: 'pending' | 'processing' | 'completed' | 'failed';
@@ -46,7 +58,7 @@ export interface Transaction {
 }
 
 async function fetchAPI(endpoint: string, options: RequestInit = {}) {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const token = typeof window !== 'undefined' ? (localStorage.getItem('token') || sessionStorage.getItem('token')) : null;
   const headers = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
@@ -60,9 +72,18 @@ async function fetchAPI(endpoint: string, options: RequestInit = {}) {
     cache: 'no-store', // Disable cache for dynamic checkout/billing operations
   });
 
-  const data = await response.json();
+  let data;
+  try {
+    data = await response.json();
+  } catch (e) {
+    if (!response.ok) {
+      throw new Error(`Server returned HTTP ${response.status}`);
+    }
+    throw new Error('Gagal membaca data dari server.');
+  }
+
   if (!response.ok) {
-    throw new Error(data.message || 'Something went wrong');
+    throw new Error(data?.message || 'Something went wrong');
   }
   return data;
 }
@@ -73,8 +94,31 @@ export interface User {
   email: string;
   role: 'admin' | 'user';
   balance: string;
+  api_token?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface TicketMessage {
+  id: number;
+  ticket_id: number;
+  sender_id: number;
+  message: string;
+  created_at: string;
+  updated_at: string;
+  sender?: User;
+}
+
+export interface Ticket {
+  id: number;
+  user_id: number;
+  title: string;
+  category: 'transaksi' | 'topup' | 'akun' | 'lainnya';
+  status: 'open' | 'replied' | 'closed';
+  created_at: string;
+  updated_at: string;
+  user?: User;
+  messages?: TicketMessage[];
 }
 
 export interface TopupMethod {
@@ -157,6 +201,7 @@ export const api = {
     product_id: number;
     target_id: string;
     target_zone?: string;
+    nickname?: string;
     payment_method: string;
     voucher_code?: string;
   }): Promise<Transaction> => {
@@ -215,6 +260,14 @@ export const api = {
     const res = await fetchAPI('/api/user/topup', {
       method: 'POST',
       body: JSON.stringify({ amount }),
+    });
+    return res.data;
+  },
+
+  updateProfile: async (payload: { name: string; password?: string }): Promise<User> => {
+    const res = await fetchAPI('/api/user/profile', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     });
     return res.data;
   },
@@ -376,6 +429,14 @@ export const api = {
     return res.data;
   },
 
+  updateGame: async (id: number, payload: { is_active: boolean; flash_sale_end: string | null }): Promise<Game> => {
+    const res = await fetchAPI(`/api/admin/games/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    return res.data;
+  },
+
   uploadGameThumbnail: async (id: number, formData: FormData): Promise<{ success: boolean; data: Game; message: string }> => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     const response = await fetch(`${API_BASE_URL}/api/admin/games/${id}/thumbnail`, {
@@ -450,7 +511,7 @@ export const api = {
     return res.data;
   },
 
-  updateAdminProduct: async (id: number, payload: { markup_type: string; markup_value: number; is_available: boolean }): Promise<any> => {
+  updateAdminProduct: async (id: number, payload: { markup_type: string; markup_value: number; is_available: boolean; flash_sale_price?: string | null }): Promise<any> => {
     const res = await fetchAPI(`/api/admin/products/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
@@ -539,5 +600,84 @@ export const api = {
     await fetchAPI(`/api/admin/announcements/${id}`, {
       method: 'DELETE',
     });
+  },
+
+  generateApiKey: async (): Promise<{ success: boolean; api_token: string; message: string }> => {
+    return await fetchAPI('/api/user/api-key', {
+      method: 'POST',
+    });
+  },
+
+  requestDigiflazzDeposit: async (payload: { amount: number; bank: string; owner_name: string }): Promise<any> => {
+    return await fetchAPI('/api/admin/digiflazz/deposit', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getDigiflazzDeposits: async (): Promise<any[]> => {
+    const res = await fetchAPI('/api/admin/digiflazz/deposits');
+    return res.data;
+  },
+
+  // Support Tickets (User)
+  getUserTickets: async (): Promise<Ticket[]> => {
+    const res = await fetchAPI('/api/user/tickets');
+    return res.data;
+  },
+
+  createTicket: async (payload: { title: string; category: string; message: string }): Promise<Ticket> => {
+    const res = await fetchAPI('/api/user/tickets', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return res.data;
+  },
+
+  getTicket: async (id: number): Promise<Ticket> => {
+    const res = await fetchAPI(`/api/user/tickets/${id}`);
+    return res.data;
+  },
+
+  replyTicket: async (id: number, message: string): Promise<TicketMessage> => {
+    const res = await fetchAPI(`/api/user/tickets/${id}/reply`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    });
+    return res.data;
+  },
+
+  closeTicket: async (id: number): Promise<Ticket> => {
+    const res = await fetchAPI(`/api/user/tickets/${id}/close`, {
+      method: 'POST',
+    });
+    return res.data;
+  },
+
+  // Support Tickets (Admin)
+  getAdminTickets: async (): Promise<Ticket[]> => {
+    const res = await fetchAPI('/api/admin/tickets');
+    return res.data;
+  },
+
+  getAdminTicket: async (id: number): Promise<Ticket> => {
+    const res = await fetchAPI(`/api/admin/tickets/${id}`);
+    return res.data;
+  },
+
+  replyAdminTicket: async (id: number, message: string): Promise<TicketMessage> => {
+    const res = await fetchAPI(`/api/admin/tickets/${id}/reply`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    });
+    return res.data;
+  },
+
+  closeAdminTicket: async (id: number, status: 'closed' | 'open' = 'closed'): Promise<Ticket> => {
+    const res = await fetchAPI(`/api/admin/tickets/${id}/close`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
+    return res.data;
   },
 };

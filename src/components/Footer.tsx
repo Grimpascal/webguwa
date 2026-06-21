@@ -13,15 +13,11 @@ export default function Footer() {
   const [footerEmail, setFooterEmail] = useState<string>('');
   const [footerHours, setFooterHours] = useState<string>('');
 
-  if (pathname !== '/') {
-    return null;
-  }
-
   const fetchWebSettings = async () => {
     try {
       const publicSettings = await api.getPublicSettings();
       setWebName(publicSettings.web_name || 'YOI Store');
-      setFooterDesc(publicSettings.footer_description || 'Platform top up game tercepat, termurah, dan terpercaya di Indonesia. Memproses transaksi otomatis 24/7 dengan dukungan integrasi Digiflazz API.');
+      setFooterDesc(publicSettings.footer_description || 'Platform top up game tercepat, termurah, dan terpercaya di Indonesia. Memproses transaksi otomatis 24/7 dengan dukungan sistem otomatis.');
       setFooterWA(publicSettings.footer_whatsapp || '+62 812-3456-7890');
       setFooterEmail(publicSettings.footer_email || 'support@yoistore.com');
       setFooterHours(publicSettings.footer_working_hours || '24 Jam Non-stop');
@@ -38,6 +34,10 @@ export default function Footer() {
       window.removeEventListener('webNameUpdated', fetchWebSettings);
     };
   }, []);
+
+  if (pathname !== '/') {
+    return null;
+  }
 
   return (
     <footer className="w-full border-t border-border bg-slate-50 py-10 mt-auto">

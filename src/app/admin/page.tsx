@@ -3,10 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { api, Transaction, AdminStats, User, TopupMethod, TopupRequest, Voucher, Announcement } from '@/services/api';
+import { api, Transaction, AdminStats, User, TopupMethod, TopupRequest, Voucher, Announcement, Game, getAssetUrl, Ticket, TicketMessage } from '@/services/api';
 import Link from 'next/link';
 
-type TabType = 'summary' | 'users' | 'products' | 'settings' | 'topup_requests' | 'topup_methods' | 'payment_methods' | 'games' | 'web_settings' | 'vouchers' | 'announcements';
+type TabType = 'summary' | 'users' | 'products' | 'settings' | 'topup_requests' | 'topup_methods' | 'payment_methods' | 'games' | 'web_settings' | 'vouchers' | 'announcements' | 'flash_sales' | 'digiflazz_topup' | 'tickets';
 
 const CATEGORIES = [
   { id: 'games', name: 'Game Voucher' },
@@ -31,6 +31,7 @@ export default function AdminDashboard() {
 
   // Navigation state
   const [activeTab, setActiveTab] = useState<TabType>('summary');
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // Loading & Data states
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -94,6 +95,23 @@ export default function AdminDashboard() {
   const [serverIp, setServerIp] = useState<string>('');
   const [copiedIp, setCopiedIp] = useState(false);
 
+  // Digiflazz Deposit states
+  const [depositAmount, setDepositAmount] = useState<string>('');
+  const [depositBank, setDepositBank] = useState<string>('BCA');
+  const [depositOwnerName, setDepositOwnerName] = useState<string>('');
+  const [depositSubmitting, setDepositSubmitting] = useState<boolean>(false);
+  const [depositTicket, setDepositTicket] = useState<{
+    bank: string;
+    payment_method: string;
+    account_no: string;
+    notes: string;
+    amount: number;
+  } | null>(null);
+  const [copiedDepositNotes, setCopiedDepositNotes] = useState<boolean>(false);
+  const [copiedDepositAmount, setCopiedDepositAmount] = useState<boolean>(false);
+  const [copiedDepositAccount, setCopiedDepositAccount] = useState<boolean>(false);
+  const [depositHistory, setDepositHistory] = useState<any[]>([]);
+
   // Voucher management states
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [voucherSearch, setVoucherSearch] = useState('');
@@ -141,6 +159,16 @@ export default function AdminDashboard() {
     type: 'info'
   });
 
+  // Support Tickets Admin states
+  const [adminTickets, setAdminTickets] = useState<Ticket[]>([]);
+  const [selectedAdminTicketId, setSelectedAdminTicketId] = useState<number | null>(null);
+  const [activeAdminTicket, setActiveAdminTicket] = useState<Ticket | null>(null);
+  const [adminTicketReply, setAdminTicketReply] = useState('');
+  const [adminReplySubmitting, setAdminReplySubmitting] = useState(false);
+  const [loadingAdminTicketDetail, setLoadingAdminTicketDetail] = useState(false);
+  const [adminTicketFilter, setAdminTicketFilter] = useState<'all' | 'open' | 'replied' | 'closed'>('all');
+  const [adminTicketSearch, setAdminTicketSearch] = useState('');
+
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -185,13 +213,35 @@ export default function AdminDashboard() {
 
   // Product Edit Modal / State
   const [editingProduct, setEditingProduct] = useState<any | null>(null);
-  const [productForm, setProductForm] = useState({
+  const [productForm, setProductForm] = useState<{
+    markup_type: string;
+    markup_value: number;
+    is_available: boolean;
+    flash_sale_price: string;
+  }>({
     markup_type: 'global',
     markup_value: 0,
-    is_available: true
+    is_available: true,
+    flash_sale_price: ''
   });
   const [productSubmitting, setProductSubmitting] = useState(false);
   const [syncingProducts, setSyncingProducts] = useState(false);
+
+  // Game Edit Modal / State
+  const [editingGame, setEditingGame] = useState<Game | null>(null);
+  const [gameModalOpen, setGameModalOpen] = useState(false);
+  const [gameForm, setGameForm] = useState({
+    is_active: true,
+    flash_sale_end: ''
+  });
+  const [gameSubmitting, setGameSubmitting] = useState(false);
+  const [gameFormErrors, setGameFormErrors] = useState<any>({});
+
+  // Flash Sale Edit Modal / State
+  const [editingFlashSaleProduct, setEditingFlashSaleProduct] = useState<any | null>(null);
+  const [flashSaleForm, setFlashSaleForm] = useState({ price: '', end: '' });
+  const [flashSaleSubmitting, setFlashSaleSubmitting] = useState(false);
+  const [flashSaleFormErrors, setFlashSaleFormErrors] = useState<any>({});
 
   // Topup States
   const [adminTopupRequests, setAdminTopupRequests] = useState<TopupRequest[]>([]);
@@ -212,6 +262,8 @@ export default function AdminDashboard() {
   const [topupMethodFormErrors, setTopupMethodFormErrors] = useState<any>({});
   const [approvingRequestId, setApprovingRequestId] = useState<number | null>(null);
   const [rejectingRequestId, setRejectingRequestId] = useState<number | null>(null);
+
+  const pendingTicketsCount = adminTickets.filter(t => t.status === 'open').length;
 
   // Check auth
   useEffect(() => {
@@ -235,7 +287,7 @@ export default function AdminDashboard() {
     setFetching(true);
     setError('');
     try {
-      const [statsData, txsData, usersData, productsData, settingsData, paymentMethodsData, topupRequestsData, topupMethodsData, publicSettingsData, gamesData, vouchersData, announcementsData] = await Promise.all([
+      const [statsData, txsData, usersData, productsData, settingsData, paymentMethodsData, topupRequestsData, topupMethodsData, publicSettingsData, gamesData, vouchersData, announcementsData, depositsData, ticketsData] = await Promise.all([
         api.getAdminStats(),
         api.getAdminTransactions(),
         api.getUsers(),
@@ -247,7 +299,9 @@ export default function AdminDashboard() {
         api.getPublicSettings(),
         api.getAdminGames(),
         api.getAdminVouchers(),
-        api.getAdminAnnouncements()
+        api.getAdminAnnouncements(),
+        api.getDigiflazzDeposits().catch(() => []),
+        api.getAdminTickets().catch(() => [])
       ]);
       
       setStats(statsData);
@@ -275,6 +329,8 @@ export default function AdminDashboard() {
       setAdminTopupMethods(topupMethodsData);
       setVouchers(vouchersData || []);
       setAnnouncements(announcementsData || []);
+      setDepositHistory(depositsData || []);
+      setAdminTickets(ticketsData || []);
     } catch (err: any) {
       console.error(err);
       setError('Gagal memuat data administrator.');
@@ -282,6 +338,70 @@ export default function AdminDashboard() {
       setFetching(false);
     }
   }
+
+  const handleSelectAdminTicket = async (id: number) => {
+    setSelectedAdminTicketId(id);
+    setLoadingAdminTicketDetail(true);
+    setError('');
+    try {
+      const data = await api.getAdminTicket(id);
+      setActiveAdminTicket(data);
+    } catch (err: any) {
+      console.error(err);
+      setError('Gagal memuat detail tiket bantuan.');
+    } finally {
+      setLoadingAdminTicketDetail(false);
+    }
+  };
+
+  const handleAdminReplySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminTicketReply.trim() || !selectedAdminTicketId) return;
+
+    setAdminReplySubmitting(true);
+    try {
+      await api.replyAdminTicket(selectedAdminTicketId, adminTicketReply.trim());
+      setAdminTicketReply('');
+      
+      // Reload ticket detail
+      const updatedTicket = await api.getAdminTicket(selectedAdminTicketId);
+      setActiveAdminTicket(updatedTicket);
+      
+      // Reload list of tickets to update order/status
+      const ticketList = await api.getAdminTickets();
+      setAdminTickets(ticketList);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Gagal membalas tiket bantuan.');
+    } finally {
+      setAdminReplySubmitting(false);
+    }
+  };
+
+  const handleAdminCloseTicket = async (id: number, status: 'closed' | 'open') => {
+    setConfirmModal({
+      isOpen: true,
+      title: status === 'closed' ? 'Tutup Tiket' : 'Buka Kembali Tiket',
+      message: `Apakah Anda yakin ingin ${status === 'closed' ? 'menutup' : 'membuka kembali'} tiket bantuan ini?`,
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        try {
+          await api.closeAdminTicket(id, status);
+          setSuccessMsg(`Status tiket berhasil diubah menjadi ${status === 'closed' ? 'Ditutup' : 'Terbuka'}.`);
+          
+          // Reload ticket detail and list
+          const updatedTicket = await api.getAdminTicket(id);
+          setActiveAdminTicket(updatedTicket);
+          const ticketList = await api.getAdminTickets();
+          setAdminTickets(ticketList);
+        } catch (err: any) {
+          console.error(err);
+          setError(err.message || 'Gagal mengubah status tiket.');
+        }
+      },
+      type: 'warning'
+    });
+  };
 
   // Auto-dismiss alert messages
   useEffect(() => {
@@ -369,6 +489,56 @@ export default function AdminDashboard() {
     navigator.clipboard.writeText(serverIp);
     setCopiedIp(true);
     setTimeout(() => setCopiedIp(false), 2000);
+  };
+
+  const handleRequestDeposit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!depositAmount || parseInt(depositAmount) < 200000) {
+      setError('Nominal deposit minimal adalah Rp 200.000');
+      return;
+    }
+    if (!depositOwnerName.trim()) {
+      setError('Nama pemilik rekening pengirim wajib diisi');
+      return;
+    }
+
+    setDepositSubmitting(true);
+    try {
+      const res = await api.requestDigiflazzDeposit({
+        amount: parseInt(depositAmount),
+        bank: depositBank,
+        owner_name: depositOwnerName,
+      });
+      if (res.success && res.data) {
+        setDepositTicket(res.data);
+        setSuccessMsg('Tiket deposit berhasil dibuat. Silakan lakukan transfer.');
+        
+        // Refresh deposit history
+        const historyData = await api.getDigiflazzDeposits().catch(() => []);
+        setDepositHistory(historyData);
+      } else {
+        setError(res.message || 'Gagal membuat tiket deposit.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Terjadi kesalahan koneksi.');
+    } finally {
+      setDepositSubmitting(false);
+    }
+  };
+
+  const handleCopyText = (text: string, type: 'notes' | 'amount' | 'account') => {
+    navigator.clipboard.writeText(text);
+    if (type === 'notes') {
+      setCopiedDepositNotes(true);
+      setTimeout(() => setCopiedDepositNotes(false), 2000);
+    } else if (type === 'amount') {
+      setCopiedDepositAmount(true);
+      setTimeout(() => setCopiedDepositAmount(false), 2000);
+    } else if (type === 'account') {
+      setCopiedDepositAccount(true);
+      setTimeout(() => setCopiedDepositAccount(false), 2000);
+    }
   };
 
   const toggleMethodActive = (index: number) => {
@@ -465,6 +635,17 @@ export default function AdminDashboard() {
       () => {
         const updatedList = paymentMethods.filter(pm => pm.id !== pmId);
         setPaymentMethods(updatedList);
+      },
+      'danger'
+    );
+  };
+
+  const handleDeleteAllPms = () => {
+    showConfirm(
+      'Hapus Semua Metode Pembayaran',
+      'Apakah Anda yakin ingin menghapus SEMUA metode pembayaran yang ada? Tindakan ini tidak dapat dibatalkan.',
+      () => {
+        setPaymentMethods([]);
       },
       'danger'
     );
@@ -865,7 +1046,8 @@ export default function AdminDashboard() {
     setProductForm({
       markup_type: product.markup_type || 'global',
       markup_value: parseFloat(product.markup_value) || 0,
-      is_available: !!product.is_available
+      is_available: !!product.is_available,
+      flash_sale_price: product.flash_sale_price ? product.flash_sale_price.toString() : ''
     });
   };
 
@@ -916,6 +1098,22 @@ export default function AdminDashboard() {
   };
 
   // Helpers
+  const isFlashActive = (endStr: string | null | undefined): boolean => {
+    if (!endStr) return false;
+    const date = new Date(endStr);
+    return !isNaN(date.getTime()) && date.getTime() > Date.now();
+  };
+
+  const calculateFlashSaleMargin = () => {
+    if (!editingFlashSaleProduct) return { margin: 0, pct: 0, isNegative: false };
+    const cost = parseFloat(editingFlashSaleProduct.original_price) || 0;
+    const flashPrice = parseFloat(flashSaleForm.price) || 0;
+    if (flashPrice <= 0) return { margin: 0, pct: 0, isNegative: false };
+    const margin = flashPrice - cost;
+    const pct = cost > 0 ? Math.round((margin / cost) * 100) : 0;
+    return { margin, pct, isNegative: margin < 0 };
+  };
+
   const formatPrice = (priceStr: string | number) => {
     const num = parseFloat(priceStr.toString());
     return new Intl.NumberFormat('id-ID', {
@@ -1494,6 +1692,124 @@ export default function AdminDashboard() {
     );
   };
 
+  const handleOpenGameEdit = (game: Game) => {
+    setEditingGame(game);
+    let formattedEnd = '';
+    if (game.flash_sale_end) {
+      const date = new Date(game.flash_sale_end);
+      if (!isNaN(date.getTime())) {
+        const localOffset = date.getTimezoneOffset() * 60000;
+        const localISOTime = (new Date(date.getTime() - localOffset)).toISOString().slice(0, 16);
+        formattedEnd = localISOTime;
+      }
+    }
+    setGameForm({
+      is_active: !!game.is_active,
+      flash_sale_end: formattedEnd
+    });
+    setGameFormErrors({});
+    setGameModalOpen(true);
+  };
+
+  const handleSaveGame = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingGame) return;
+    setGameSubmitting(true);
+    setGameFormErrors({});
+    try {
+      let apiEndVal: string | null = null;
+      if (gameForm.flash_sale_end) {
+        apiEndVal = gameForm.flash_sale_end.replace('T', ' ') + ':00';
+      }
+      
+      const updatedGame = await api.updateGame(editingGame.id, {
+        is_active: gameForm.is_active,
+        flash_sale_end: apiEndVal
+      });
+
+      setSuccessMsg(`Brand ${updatedGame.name} berhasil diperbarui.`);
+      setGameModalOpen(false);
+      setEditingGame(null);
+      const gamesList = await api.getAdminGames();
+      setGames(gamesList);
+    } catch (err: any) {
+      console.error(err);
+      if (err.errors) {
+        setGameFormErrors(err.errors);
+      } else {
+        setError(err.message || 'Gagal memperbarui game.');
+      }
+    } finally {
+      setGameSubmitting(false);
+    }
+  };
+
+  const handleOpenFlashSaleEdit = (product: any) => {
+    setEditingFlashSaleProduct(product);
+    let formattedEnd = '';
+    const game = product.game;
+    if (game && game.flash_sale_end) {
+      const date = new Date(game.flash_sale_end);
+      if (!isNaN(date.getTime())) {
+        const localOffset = date.getTimezoneOffset() * 60000;
+        const localISOTime = (new Date(date.getTime() - localOffset)).toISOString().slice(0, 16);
+        formattedEnd = localISOTime;
+      }
+    }
+    setFlashSaleForm({
+      price: product.flash_sale_price ? product.flash_sale_price.toString() : '',
+      end: formattedEnd
+    });
+    setFlashSaleFormErrors({});
+  };
+
+  const handleSaveFlashSale = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingFlashSaleProduct) return;
+    setFlashSaleSubmitting(true);
+    setFlashSaleFormErrors({});
+    try {
+      const gameId = editingFlashSaleProduct.game_id;
+      let apiEndVal: string | null = null;
+      if (flashSaleForm.end) {
+        apiEndVal = flashSaleForm.end.replace('T', ' ') + ':00';
+      }
+
+      // 1. Update the game's flash_sale_end and make sure is_active is true
+      await api.updateGame(gameId, {
+        is_active: true,
+        flash_sale_end: apiEndVal
+      });
+
+      // 2. Update the product's flash_sale_price
+      await api.updateAdminProduct(editingFlashSaleProduct.id, {
+        markup_type: editingFlashSaleProduct.markup_type || 'global',
+        markup_value: parseFloat(editingFlashSaleProduct.markup_value) || 0,
+        is_available: !!editingFlashSaleProduct.is_available,
+        flash_sale_price: flashSaleForm.price || null
+      });
+
+      setSuccessMsg('Pengaturan Flash Sale berhasil disimpan.');
+      setEditingFlashSaleProduct(null);
+      
+      const [productsList, gamesList] = await Promise.all([
+        api.getAdminProducts(),
+        api.getAdminGames()
+      ]);
+      setProducts(productsList);
+      setGames(gamesList);
+    } catch (err: any) {
+      console.error(err);
+      if (err.errors) {
+        setFlashSaleFormErrors(err.errors);
+      } else {
+        setError(err.message || 'Gagal menyimpan pengaturan Flash Sale.');
+      }
+    } finally {
+      setFlashSaleSubmitting(false);
+    }
+  };
+
   const handleGameThumbnailUpload = async (gameId: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1529,6 +1845,202 @@ export default function AdminDashboard() {
         const initials = (code || 'GP').substring(0, 3).toUpperCase();
         return <span className="text-slate-400 font-black text-sm">{initials}</span>;
     }
+  };
+
+  const renderFlashSales = () => {
+    const formatEndDate = (endStr: string | null | undefined): string => {
+      if (!endStr) return 'Tidak Aktif';
+      const date = new Date(endStr);
+      if (isNaN(date.getTime())) return 'Format Salah';
+      
+      return date.toLocaleString('id-ID', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    };
+
+    return (
+      <div className="space-y-6 animate-in fade-in duration-300 text-xs">
+        {/* Header Section */}
+        <div className="bg-gradient-to-r from-purple-700 via-pink-600 to-orange-500 text-white p-5 rounded-2xl shadow-md relative overflow-hidden">
+          <div className="absolute right-0 bottom-0 w-36 h-36 bg-white/5 rounded-full blur-2xl -mr-10 -mb-10 pointer-events-none" />
+          <div className="relative z-10">
+            <h2 className="text-base md:text-lg font-black font-heading tracking-tight uppercase">Sentra Manajemen Flash Sale</h2>
+            <p className="text-[10px] sm:text-xs text-white/85 mt-1 font-medium">Atur batas waktu aktif flash sale per game dan berikan harga diskon khusus produk di satu tempat terpusat.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+          {/* Section 1: Games/Brands Flash Sale status */}
+          <div className="xl:col-span-2 bg-white p-5 rounded-2xl border border-border shadow-sm flex flex-col space-y-4">
+            <div>
+              <h3 className="font-extrabold text-foreground text-sm font-heading mb-1 uppercase tracking-wider">1. Waktu Flash Sale Game</h3>
+              <p className="text-[10px] text-foreground/45">Aktifkan periode flash sale dan batas waktu hitung mundur game.</p>
+            </div>
+
+            <div className="space-y-3 overflow-y-auto max-h-[600px] pr-1">
+              {games && games.length > 0 ? (
+                games.map((g) => {
+                  const active = isFlashActive(g.flash_sale_end);
+                  return (
+                    <div key={g.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 flex items-center justify-between gap-3 hover:border-slate-200 transition-all">
+                      <div className="flex items-center space-x-3 min-w-0">
+                        {g.thumbnail ? (
+                          <img
+                            src={getAssetUrl(g.thumbnail)}
+                            alt={g.name}
+                            className="w-10 h-10 rounded-lg object-cover shadow-xs border border-slate-200 shrink-0"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-lg bg-primary text-white flex items-center justify-center font-bold text-xs shrink-0">
+                            {g.code.slice(0, 3)}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-800 truncate">{g.name}</p>
+                          <p className="text-[9px] font-mono text-slate-400 mt-0.5">{g.code}</p>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
+                        {active ? (
+                          <span className="bg-emerald-100 text-emerald-800 text-[8px] font-black px-2 py-0.5 rounded-full border border-emerald-200 leading-none">
+                            AKTIF
+                          </span>
+                        ) : (
+                          <span className="bg-slate-200 text-slate-600 text-[8px] font-bold px-2 py-0.5 rounded-full leading-none">
+                            OFF
+                          </span>
+                        )}
+                        <p className="text-[9px] font-semibold text-foreground/60">{formatEndDate(g.flash_sale_end)}</p>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-center py-6 text-foreground/40 text-xs">Belum ada data game.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Section 2: Products Flash Sale Prices */}
+          <div className="xl:col-span-3 bg-white p-5 rounded-2xl border border-border shadow-sm flex flex-col space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-extrabold text-foreground text-sm font-heading mb-1 uppercase tracking-wider">2. Harga Promo Nominal Produk</h3>
+                <p className="text-[10px] text-foreground/45">Atur nominal harga khusus diskon flash sale per item produk.</p>
+              </div>
+
+              {/* Game filter dropdown */}
+              <select
+                value={productGameFilter}
+                onChange={(e) => setProductGameFilter(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-primary cursor-pointer self-start sm:self-auto"
+              >
+                <option value="all">Semua Game</option>
+                {uniqueGames.map((g: any) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[500px]">
+                <thead>
+                  <tr className="border-b border-slate-100 text-[10px] text-foreground/50 uppercase tracking-wider font-bold">
+                    <th className="pb-3 pl-3">Game / Item</th>
+                    <th className="pb-3 text-right">Harga Reguler</th>
+                    <th className="pb-3 text-right pl-4">Harga Flash Sale</th>
+                    <th className="pb-3 text-right pl-4">Margin FS</th>
+                    <th className="pb-3 text-center">Status Diskon</th>
+                    <th className="pb-3 pr-3 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {products && products.length > 0 ? (
+                    products
+                      .filter((p) => {
+                        if (!p) return false;
+                        if (productGameFilter === 'all') return true;
+                        return p.game_id?.toString() === productGameFilter.toString();
+                      })
+                      .map((p) => {
+                        const hasSale = !!p.flash_sale_price;
+                        const gameInfo = p.game;
+                        const gameSaleActive = gameInfo && isFlashActive(gameInfo.flash_sale_end);
+                        
+                        const cost = parseFloat(p.original_price);
+                        const flashPrice = hasSale ? parseFloat(p.flash_sale_price!) : 0;
+                        const fsMarkup = hasSale ? (flashPrice - cost) : 0;
+                        const fsMarkupPct = (hasSale && cost > 0) ? Math.round((fsMarkup / cost) * 100) : 0;
+
+                        return (
+                          <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="py-3 pl-3">
+                              <span className="font-mono text-[9px] bg-slate-100 text-slate-500 px-1 py-0.5 rounded mr-1.5 uppercase font-bold border border-slate-200">
+                                {gameInfo?.name || 'N/A'}
+                              </span>
+                              <span className="font-extrabold text-slate-700">{p.name}</span>
+                            </td>
+                            <td className="py-3 text-right font-bold text-slate-600">
+                              {formatPrice(p.price)}
+                            </td>
+                            <td className="py-3 text-right font-black text-[#e11d48] pl-4">
+                              {p.flash_sale_price ? formatPrice(p.flash_sale_price) : '-'}
+                            </td>
+                            <td className="py-3 text-right pl-4 font-semibold text-xs">
+                              {hasSale ? (
+                                <span className={fsMarkup < 0 ? 'text-error font-extrabold' : 'text-success'}>
+                                  {formatPrice(fsMarkup)} ({fsMarkupPct}%)
+                                </span>
+                              ) : (
+                                <span className="text-foreground/30 font-normal">-</span>
+                              )}
+                            </td>
+                            <td className="py-3 text-center">
+                              {hasSale ? (
+                                gameSaleActive ? (
+                                  <span className="bg-[#e11d48]/10 text-[#e11d48] text-[8px] font-black px-2 py-0.5 rounded border border-[#e11d48]/20">
+                                    LIVE PROMO
+                                  </span>
+                                ) : (
+                                  <span className="bg-yellow-50 text-yellow-700 text-[8px] font-bold px-2 py-0.5 rounded border border-yellow-200">
+                                    PENDING (GAME OFF)
+                                  </span>
+                                )
+                              ) : (
+                                <span className="text-foreground/30 text-[9px]">Tidak Ada</span>
+                              )}
+                            </td>
+                            <td className="py-3 text-center pr-3">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenFlashSaleEdit(p)}
+                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[9px] font-bold uppercase transition-colors cursor-pointer border border-slate-200"
+                              >
+                                Atur Harga
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="text-center py-6 text-foreground/40 text-xs">
+                        Tidak ada nominal produk tersedia.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const renderGames = () => {
@@ -1621,17 +2133,26 @@ export default function AdminDashboard() {
                   <span className="font-mono text-[9px] text-slate-400 font-bold block mt-0.5">{g.code}</span>
                 </div>
 
-                {/* Upload Button */}
-                <label className="w-full inline-flex items-center justify-center px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-colors text-[10px] font-bold text-slate-600 uppercase tracking-wider cursor-pointer text-center">
-                  <span>{uploadingGameId === g.id ? 'Loading...' : 'Upload Logo'}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    disabled={uploadingGameId !== null}
-                    onChange={(e) => handleGameThumbnailUpload(g.id, e)}
-                    className="hidden"
-                  />
-                </label>
+                {/* Actions Button */}
+                <div className="w-full flex gap-2">
+                  <label className="flex-1 inline-flex items-center justify-center px-2 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-colors text-[9px] font-bold text-slate-600 uppercase tracking-wider cursor-pointer text-center">
+                    <span>{uploadingGameId === g.id ? '...' : 'Logo'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={uploadingGameId !== null}
+                      onChange={(e) => handleGameThumbnailUpload(g.id, e)}
+                      className="hidden"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenGameEdit(g)}
+                    className="flex-1 inline-flex items-center justify-center px-2 py-2 rounded-xl border border-primary/20 text-primary hover:bg-primary-light active:bg-primary-light/40 transition-colors text-[9px] font-bold uppercase tracking-wider cursor-pointer text-center bg-white"
+                  >
+                    Edit Info
+                  </button>
+                </div>
               </div>
             ))
           )}
@@ -1871,6 +2392,258 @@ export default function AdminDashboard() {
                           className="text-xs font-bold text-error hover:underline cursor-pointer"
                         >
                           Hapus
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderTickets = () => {
+    const getStatusBadge = (status: Ticket['status']) => {
+      switch (status) {
+        case 'open':
+          return (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-warning/10 text-warning border border-warning/20 uppercase">
+              Menunggu Balasan
+            </span>
+          );
+        case 'replied':
+          return (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-success/10 text-success border border-success/20 uppercase">
+              Dibalas
+            </span>
+          );
+        case 'closed':
+          return (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-400 border border-slate-200 uppercase">
+              Ditutup
+            </span>
+          );
+        default:
+          return null;
+      }
+    };
+
+    const getCategoryLabel = (category: Ticket['category']) => {
+      switch (category) {
+        case 'transaksi':
+          return 'Masalah Transaksi';
+        case 'topup':
+          return 'Top Up Saldo';
+        case 'akun':
+          return 'Masalah Akun';
+        default:
+          return 'Lainnya';
+      }
+    };
+
+    if (selectedAdminTicketId && activeAdminTicket) {
+      return (
+        <div className="bg-white rounded-2xl border border-border overflow-hidden shadow-sm animate-in fade-in duration-300 flex flex-col min-h-[60vh] text-xs">
+          {/* Ticket Detail Header */}
+          <div className="p-5 border-b border-border flex flex-wrap items-center justify-between gap-4 shrink-0 bg-slate-50">
+            <div className="space-y-1">
+              <button
+                onClick={() => {
+                  setSelectedAdminTicketId(null);
+                  setActiveAdminTicket(null);
+                }}
+                className="text-xs font-bold text-primary hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer mb-2"
+              >
+                &larr; Kembali ke Daftar Tiket
+              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-sm font-bold text-slate-800 font-heading">
+                  #{activeAdminTicket.id} - {activeAdminTicket.title}
+                </h2>
+                {getStatusBadge(activeAdminTicket.status)}
+              </div>
+              <p className="text-[10px] text-slate-400 font-medium">
+                Pelanggan: <span className="font-bold text-slate-700">{activeAdminTicket.user?.name} ({activeAdminTicket.user?.email})</span> • Kategori: <span className="font-bold text-slate-600">{getCategoryLabel(activeAdminTicket.category)}</span>
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {activeAdminTicket.status === 'closed' ? (
+                <button
+                  onClick={() => handleAdminCloseTicket(activeAdminTicket.id, 'open')}
+                  className="bg-success/10 hover:bg-success/20 text-success px-3.5 py-2 rounded-xl text-xs font-bold transition-all border-0 cursor-pointer active:scale-95"
+                >
+                  Buka Kembali Tiket
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleAdminCloseTicket(activeAdminTicket.id, 'closed')}
+                  className="bg-error/10 hover:bg-error/20 text-error px-3.5 py-2 rounded-xl text-xs font-bold transition-all border-0 cursor-pointer active:scale-95"
+                >
+                  Tutup Tiket
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Ticket Messages Thread */}
+          <div className="flex-grow p-5 overflow-y-auto space-y-4 max-h-[450px] bg-slate-50/30">
+            {loadingAdminTicketDetail ? (
+              <div className="flex justify-center items-center py-10">
+                <svg className="animate-spin h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              </div>
+            ) : (
+              activeAdminTicket.messages?.map((msg) => {
+                const isAdminMsg = msg.sender?.role === 'admin';
+                return (
+                  <div
+                    key={msg.id}
+                    className={`flex ${isAdminMsg ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div className="max-w-[80%] flex flex-col space-y-1">
+                      <div
+                        className={`rounded-2xl px-4 py-3 text-xs leading-relaxed font-sans shadow-xs ${
+                          isAdminMsg
+                            ? 'bg-primary text-white rounded-tr-none'
+                            : 'bg-white text-slate-800 border border-slate-100 rounded-tl-none'
+                        }`}
+                      >
+                        {msg.message}
+                      </div>
+                      <span
+                        className={`text-[9px] text-slate-400 px-1 font-mono ${
+                          isAdminMsg ? 'text-right' : 'text-left'
+                        }`}
+                      >
+                        {isAdminMsg ? 'Anda (Admin)' : `${msg.sender?.name || 'User'}`} • {new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Ticket Messages Input */}
+          <div className="p-4 border-t border-border bg-white shrink-0">
+            {activeAdminTicket.status === 'closed' ? (
+              <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center font-semibold text-slate-500 mb-2">
+                Tiket ini telah ditutup. Buka kembali tiket untuk mengirimkan pesan tanggapan.
+              </div>
+            ) : (
+              <form onSubmit={handleAdminReplySubmit} className="flex items-stretch gap-2">
+                <input
+                  type="text"
+                  placeholder="Tulis pesan tanggapan admin..."
+                  value={adminTicketReply}
+                  onChange={(e) => setAdminTicketReply(e.target.value)}
+                  disabled={adminReplySubmitting}
+                  className="flex-grow px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 border border-slate-200 focus:border-primary text-slate-800 font-medium placeholder-slate-400"
+                  required
+                />
+                <button
+                  type="submit"
+                  disabled={adminReplySubmitting || !adminTicketReply.trim()}
+                  className="bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-bold text-xs px-5 rounded-xl transition-all border-0 cursor-pointer flex items-center justify-center shrink-0"
+                >
+                  {adminReplySubmitting ? 'Mengirim...' : 'Kirim Balasan'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    const filteredTickets = adminTickets.filter((t) => {
+      const matchesFilter = adminTicketFilter === 'all' || t.status === adminTicketFilter;
+      const query = adminTicketSearch.toLowerCase().trim();
+      const matchesSearch = !query || 
+        t.title.toLowerCase().includes(query) ||
+        t.id.toString().includes(query) ||
+        t.user?.name?.toLowerCase().includes(query) ||
+        t.user?.email?.toLowerCase().includes(query);
+      return matchesFilter && matchesSearch;
+    });
+
+    return (
+      <div className="space-y-6 animate-in fade-in duration-300 text-xs">
+        <div className="bg-white p-5 rounded-2xl border border-border shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <h2 className="text-base font-bold text-foreground font-heading">Tiket Bantuan Pelanggan</h2>
+            <p className="text-[11px] text-foreground/45 mt-0.5">Kelola aduan dan berikan tanggapan support untuk pelanggan</p>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <input
+              type="text"
+              placeholder="Cari ID, Judul, Pelanggan..."
+              value={adminTicketSearch}
+              onChange={(e) => setAdminTicketSearch(e.target.value)}
+              className="px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs text-foreground bg-slate-50 focus:outline-none focus:border-primary placeholder-slate-400 font-semibold flex-grow sm:flex-grow-0 sm:w-56"
+            />
+            <select
+              value={adminTicketFilter}
+              onChange={(e) => setAdminTicketFilter(e.target.value as any)}
+              className="px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs text-foreground bg-slate-50 focus:outline-none focus:border-primary font-bold cursor-pointer"
+            >
+              <option value="all">Semua Status</option>
+              <option value="open">Menunggu Balasan (Open)</option>
+              <option value="replied">Sudah Dibalas (Replied)</option>
+              <option value="closed">Ditutup (Closed)</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-border overflow-hidden shadow-sm">
+          {filteredTickets.length === 0 ? (
+            <div className="text-center py-16">
+              <p className="text-sm text-foreground/40 font-medium">Tidak ada tiket bantuan yang ditemukan.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-border text-foreground/60 text-xs font-bold uppercase tracking-wider">
+                    <th className="px-6 py-4">ID</th>
+                    <th className="px-6 py-4">Pelanggan</th>
+                    <th className="px-6 py-4">Subjek / Judul</th>
+                    <th className="px-6 py-4">Kategori</th>
+                    <th className="px-6 py-4">Tanggal Update</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredTickets.map((t) => (
+                    <tr key={t.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4 font-mono font-bold text-primary">#{t.id}</td>
+                      <td className="px-6 py-4">
+                        <span className="font-bold text-foreground block">{t.user?.name || 'Unknown'}</span>
+                        <span className="text-[10px] text-slate-400 block">{t.user?.email || '-'}</span>
+                      </td>
+                      <td className="px-6 py-4 font-semibold text-slate-700 max-w-xs truncate">{t.title}</td>
+                      <td className="px-6 py-4 font-bold text-slate-500">{getCategoryLabel(t.category)}</td>
+                      <td className="px-6 py-4 text-slate-400 font-medium">
+                        {new Date(t.updated_at).toLocaleString('id-ID', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </td>
+                      <td className="px-6 py-4">{getStatusBadge(t.status)}</td>
+                      <td className="px-6 py-4 text-right">
+                        <button
+                          onClick={() => handleSelectAdminTicket(t.id)}
+                          className="text-xs font-bold text-primary hover:underline cursor-pointer bg-transparent border-0"
+                        >
+                          Buka Tiket &rarr;
                         </button>
                       </td>
                     </tr>
@@ -2162,141 +2935,92 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Header */}
-      <div className="border-b border-border pb-5 mb-6 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-foreground font-heading">
-            Panel Administrator
-          </h1>
-          <p className="text-xs md:text-sm text-foreground/50 mt-0.5">
-            Kelola transaksi, sinkronisasi harga Digiflazz, dan akun pengguna
-          </p>
-        </div>
-        <div className="flex items-center space-x-2 text-xs font-semibold self-start md:self-center">
-          <span className="text-foreground/45">Admin:</span>
-          <span className="bg-primary/10 text-primary px-2.5 py-0.5 rounded-full border border-primary/20 text-[10px] font-bold uppercase tracking-wider">
-            {currentUser?.name}
-          </span>
-        </div>
-      </div>
+
 
       {/* Dashboard Layout (Sidebar on Desktop, Stack on Mobile) */}
       <div className="flex flex-col md:flex-row gap-6 items-start">
         {/* Navigation Sidebar (Desktop: Left, Mobile: Top) */}
         <aside className="w-full md:w-64 shrink-0 flex flex-col space-y-4">
           
-          {/* Mobile Tab Control (Visible on mobile, hidden on desktop) */}
-          <div className="md:hidden bg-slate-100 p-1 rounded-xl flex overflow-x-auto space-x-1 scrollbar-hide shadow-inner w-full shrink-0">
+          {/* Mobile Tab Control (Visible on mobile, hamburger menu) */}
+          <div className="md:hidden w-full relative">
             <button
-              onClick={() => setActiveTab('summary')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'summary'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
+              type="button"
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="w-full flex items-center justify-between bg-white border border-border px-4 py-3 rounded-xl shadow-sm text-xs font-bold text-foreground hover:bg-slate-50 transition-all cursor-pointer"
             >
-              Ringkasan
+              <div className="flex items-center space-x-2.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse" />
+                <span className="text-slate-400">Navigasi Admin:</span>
+                <span className="text-primary font-black uppercase">
+                  {activeTab === 'summary' && 'Ringkasan'}
+                  {activeTab === 'users' && 'Pengguna'}
+                  {activeTab === 'products' && 'Produk'}
+                  {activeTab === 'settings' && 'API Config'}
+                  {activeTab === 'digiflazz_topup' && 'Isi Saldo Digiflazz'}
+                  {activeTab === 'topup_requests' && 'Persetujuan Topup'}
+                  {activeTab === 'topup_methods' && 'Metode Transfer'}
+                  {activeTab === 'payment_methods' && 'Metode Pembayaran'}
+                  {activeTab === 'games' && 'Brand / Game'}
+                  {activeTab === 'web_settings' && 'Identitas Web'}
+                  {activeTab === 'vouchers' && 'Voucher'}
+                  {activeTab === 'announcements' && 'Pengumuman'}
+                  {activeTab === 'flash_sales' && 'Flash Sale'}
+                  {activeTab === 'tickets' && 'Tiket Bantuan'}
+                </span>
+              </div>
+              <div className="flex items-center space-x-1.5 text-slate-500">
+                <svg className={`w-4 h-4 transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
             </button>
-            <button
-              onClick={() => setActiveTab('users')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'users'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Pengguna
-            </button>
-            <button
-              onClick={() => setActiveTab('products')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'products'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Produk
-            </button>
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'settings'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              API Config
-            </button>
-            <button
-              onClick={() => setActiveTab('topup_requests')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'topup_requests'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Persetujuan Topup
-            </button>
-            <button
-              onClick={() => setActiveTab('topup_methods')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'topup_methods'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Metode Transfer
-            </button>
-            <button
-              onClick={() => setActiveTab('payment_methods')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'payment_methods'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Metode Pembayaran
-            </button>
-            <button
-              onClick={() => setActiveTab('games')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'games'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Thumbnail Brand
-            </button>
-            <button
-              onClick={() => setActiveTab('web_settings')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'web_settings'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Identitas Web
-            </button>
-            <button
-              onClick={() => setActiveTab('vouchers')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'vouchers'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Voucher
-            </button>
-            <button
-              onClick={() => setActiveTab('announcements')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'announcements'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Pengumuman
-            </button>
+
+            {menuOpen && (
+              <div className="absolute left-0 right-0 mt-1.5 bg-white border border-border rounded-xl shadow-xl z-30 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="p-1 space-y-1">
+                  {[
+                    { key: 'summary', name: 'Ringkasan' },
+                    { key: 'users', name: 'Pengguna' },
+                    { key: 'games', name: 'Brand / Game' },
+                    { key: 'products', name: 'Produk' },
+                    { key: 'vouchers', name: 'Voucher' },
+                    { key: 'flash_sales', name: 'Flash Sale' },
+                    { key: 'announcements', name: 'Pengumuman' },
+                    { key: 'topup_requests', name: 'Persetujuan Topup' },
+                    { key: 'topup_methods', name: 'Metode Transfer' },
+                    { key: 'payment_methods', name: 'Metode Pembayaran' },
+                    { key: 'settings', name: 'API Config' },
+                    { key: 'digiflazz_topup', name: 'Isi Saldo Digiflazz' },
+                    { key: 'web_settings', name: 'Identitas Web' },
+                    { key: 'tickets', name: 'Tiket Bantuan' }
+                  ].map((tab) => {
+                    const isSelected = activeTab === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        onClick={() => {
+                          setActiveTab(tab.key as any);
+                          setMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-4 py-3 rounded-lg text-xs font-bold uppercase transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-primary/5 text-primary font-black'
+                            : 'text-slate-500 hover:text-foreground hover:bg-slate-50'
+                        }`}
+                      >
+                        <span>{tab.name}</span>
+                        {tab.key === 'tickets' && pendingTicketsCount > 0 && (
+                          <span className="w-4 h-4 bg-error text-white font-extrabold rounded-full flex items-center justify-center text-[9px] scale-95 shrink-0 animate-pulse">
+                            {pendingTicketsCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Desktop Navigation Sidebar (Hidden on mobile, visible on desktop) */}
@@ -2308,14 +3032,14 @@ export default function AdminDashboard() {
               </span>
               <button
                 onClick={() => setActiveTab('summary')}
-                className={`w-full flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
                   activeTab === 'summary'
                     ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
                     : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
                 }`}
               >
                 <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2-2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
                 <span>Ringkasan</span>
               </button>
@@ -2342,6 +3066,20 @@ export default function AdminDashboard() {
               </button>
 
               <button
+                onClick={() => setActiveTab('games')}
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                  activeTab === 'games'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                </svg>
+                <span>Brand / Game</span>
+              </button>
+
+              <button
                 onClick={() => setActiveTab('products')}
                 className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
                   activeTab === 'products'
@@ -2354,6 +3092,69 @@ export default function AdminDashboard() {
                 </svg>
                 <span>Produk</span>
               </button>
+
+              <button
+                onClick={() => setActiveTab('vouchers')}
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                  activeTab === 'vouchers'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+                </svg>
+                <span>Voucher</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('flash_sales')}
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                  activeTab === 'flash_sales'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span>Flash Sale</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('announcements')}
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                  activeTab === 'announcements'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+                <span>Pengumuman</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('tickets')}
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center justify-between px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                  activeTab === 'tickets'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
+              >
+                <div className="flex items-center space-x-3">
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+                  </svg>
+                  <span>Tiket Bantuan</span>
+                </div>
+                {pendingTicketsCount > 0 && (
+                  <span className="w-4 h-4 bg-error text-white font-extrabold rounded-full flex items-center justify-center text-[9px] scale-95 shrink-0 animate-pulse">
+                    {pendingTicketsCount}
+                  </span>
+                )}
+              </button>
             </div>
 
             {/* Group: Keuangan */}
@@ -2364,7 +3165,7 @@ export default function AdminDashboard() {
               
               <button
                 onClick={() => setActiveTab('topup_requests')}
-                className={`w-full flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
                   activeTab === 'topup_requests'
                     ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
                     : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
@@ -2378,7 +3179,7 @@ export default function AdminDashboard() {
 
               <button
                 onClick={() => setActiveTab('topup_methods')}
-                className={`w-full flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
                   activeTab === 'topup_methods'
                     ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
                     : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
@@ -2392,7 +3193,7 @@ export default function AdminDashboard() {
 
               <button
                 onClick={() => setActiveTab('payment_methods')}
-                className={`w-full flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
                   activeTab === 'payment_methods'
                     ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
                     : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
@@ -2405,15 +3206,15 @@ export default function AdminDashboard() {
               </button>
             </div>
 
-            {/* Group: Konfigurasi */}
+            {/* Group: Digiflazz */}
             <div className="space-y-1">
               <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-3 mb-1.5 block">
-                Konfigurasi
+                Digiflazz
               </span>
               
               <button
                 onClick={() => setActiveTab('settings')}
-                className={`w-full flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
                   activeTab === 'settings'
                     ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
                     : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
@@ -2427,22 +3228,29 @@ export default function AdminDashboard() {
               </button>
 
               <button
-                onClick={() => setActiveTab('games')}
-                className={`w-full flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
-                  activeTab === 'games'
+                onClick={() => setActiveTab('digiflazz_topup')}
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                  activeTab === 'digiflazz_topup'
                     ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
                     : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
                 }`}
               >
                 <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span>Thumbnail Brand</span>
+                <span>Isi Saldo</span>
               </button>
+            </div>
 
+            {/* Group: Konfigurasi Sistem */}
+            <div className="space-y-1">
+              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-3 mb-1.5 block">
+                Konfigurasi Sistem
+              </span>
+              
               <button
                 onClick={() => setActiveTab('web_settings')}
-                className={`w-full flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
                   activeTab === 'web_settings'
                     ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
                     : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
@@ -2452,34 +3260,6 @@ export default function AdminDashboard() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
                 </svg>
                 <span>Identitas Web</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('vouchers')}
-                className={`w-full flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
-                  activeTab === 'vouchers'
-                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
-                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
-                }`}
-              >
-                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
-                </svg>
-                <span>Voucher</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('announcements')}
-                className={`w-full flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
-                  activeTab === 'announcements'
-                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
-                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
-                }`}
-              >
-                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                </svg>
-                <span>Pengumuman</span>
               </button>
             </div>
           </div>
@@ -3066,75 +3846,7 @@ export default function AdminDashboard() {
             </form>
           </div>
 
-          {/* Edit Markup Inline Section */}
-          {editingProduct && (
-            <div className="bg-primary/5 p-5 rounded-2xl border border-primary/20 animate-in slide-in-from-top duration-300">
-              <h3 className="text-xs font-bold text-primary uppercase tracking-wider mb-4 leading-none flex items-center">
-                <span className="w-2 h-2 rounded-full bg-primary mr-2 animate-ping" />
-                Ubah Aturan Markup & Harga: <span className="text-foreground ml-1.5 lowercase font-semibold">{editingProduct.name}</span>
-              </h3>
-              <form onSubmit={handleSaveProduct} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3.5 items-end text-xs">
-                <div>
-                  <span className="block text-[10px] font-bold text-foreground/50 uppercase mb-2">Harga Modal (Provider)</span>
-                  <span className="block font-mono font-bold text-slate-500 text-sm leading-none pt-1">{formatPrice(editingProduct.original_price)}</span>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Tipe Keuntungan</label>
-                  <select
-                    value={productForm.markup_type}
-                    onChange={(e) => setProductForm({ ...productForm, markup_type: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl bg-white text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-semibold cursor-pointer"
-                  >
-                    <option value="global">Ikuti Global</option>
-                    <option value="percent">Persentase (%)</option>
-                    <option value="flat">Rupiah (Flat IDR)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Nilai Keuntungan</label>
-                  <input
-                    type="number"
-                    required
-                    disabled={productForm.markup_type === 'global'}
-                    value={productForm.markup_value}
-                    onChange={(e) => setProductForm({ ...productForm, markup_value: parseFloat(e.target.value) || 0 })}
-                    className="w-full px-4 py-2.5 rounded-xl bg-white text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-bold disabled:opacity-50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Status Stok</label>
-                  <select
-                    value={productForm.is_available ? '1' : '0'}
-                    onChange={(e) => setProductForm({ ...productForm, is_available: e.target.value === '1' })}
-                    className="w-full px-4 py-2.5 rounded-xl bg-white text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-semibold cursor-pointer"
-                  >
-                    <option value="1">Aktif / Tersedia</option>
-                    <option value="0">Nonaktif / Kosong</option>
-                  </select>
-                </div>
-                <div>
-                  <span className="block text-[10px] font-bold text-foreground/50 uppercase mb-2">Estimasi Harga Jual</span>
-                  <span className="block font-mono font-extrabold text-success text-sm leading-none pt-1">{formatPrice(calculatePreviewPrice())}</span>
-                </div>
-                <div className="sm:col-span-2 md:col-span-5 flex justify-end gap-2.5 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingProduct(null)}
-                    className="px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer text-center"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={productSubmitting}
-                    className="glow-button px-6 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl disabled:opacity-50 cursor-pointer text-center"
-                  >
-                    {productSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
+
 
           {/* Products Cards for MOBILE */}
           <div className="block sm:hidden divide-y divide-slate-100 bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
@@ -3145,7 +3857,8 @@ export default function AdminDashboard() {
             ) : (
               filteredProducts.map((prod) => {
                 const cost = parseFloat(prod.original_price);
-                const sell = parseFloat(prod.price);
+                const isFlashSale = prod.flash_sale_price && prod.game && isFlashActive(prod.game.flash_sale_end);
+                const sell = isFlashSale ? parseFloat(prod.flash_sale_price!) : parseFloat(prod.price);
                 const markup = sell - cost;
                 const markupPct = cost > 0 ? Math.round((markup / cost) * 100) : 0;
 
@@ -3178,14 +3891,27 @@ export default function AdminDashboard() {
                           <span className="font-mono font-semibold text-slate-500">{formatPrice(prod.original_price)}</span>
                         </div>
                         <div>
-                          <span className="text-slate-400 block text-[9px]">Jual (YOI)</span>
+                          <span className="text-slate-400 block text-[9px]">Jual ({(webNameForm.split(' ')[0] || 'YOI')})</span>
                           <span className="font-mono font-bold text-foreground">{formatPrice(prod.price)}</span>
                         </div>
                         <div>
                           <span className="text-slate-400 block text-[9px]">Aturan / Margin Profit</span>
-                          <span className="font-semibold text-success block">
-                            {getProductMarkupLabel(prod)} &rarr; {formatPrice(markup)} ({markupPct}%)
-                          </span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            {isFlashSale ? (
+                              <>
+                                <span className={markup < 0 ? 'text-error font-extrabold' : 'text-[#e11d48] font-extrabold'}>
+                                  {formatPrice(markup)} ({markupPct}%)
+                                </span>
+                                <span className="text-[8px] font-black text-[#e11d48] bg-[#e11d48]/10 border border-[#e11d48]/20 px-1.5 py-0.5 rounded leading-none uppercase shrink-0">
+                                  Flash Sale
+                                </span>
+                              </>
+                            ) : (
+                              <span className="font-semibold text-success block">
+                                {getProductMarkupLabel(prod)} &rarr; {formatPrice(markup)} ({markupPct}%)
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       
@@ -3218,7 +3944,8 @@ export default function AdminDashboard() {
                       <th className="px-6 py-4">SKU Code</th>
                       <th className="px-6 py-4">Harga Modal (Digiflazz)</th>
                       <th className="px-6 py-4">Aturan Markup</th>
-                      <th className="px-6 py-4">Harga Jual (YOI)</th>
+                      <th className="px-6 py-4">Harga Jual ({(webNameForm.split(' ')[0] || 'YOI')})</th>
+                      <th className="px-6 py-4 text-[#e11d48]">Harga Flash Sale</th>
                       <th className="px-6 py-4">Margin Profit</th>
                       <th className="px-6 py-4">Ketersediaan</th>
                       <th className="px-6 py-4 text-right">Aksi</th>
@@ -3227,7 +3954,8 @@ export default function AdminDashboard() {
                   <tbody className="divide-y divide-slate-100">
                     {filteredProducts.map((prod) => {
                       const cost = parseFloat(prod.original_price);
-                      const sell = parseFloat(prod.price);
+                      const isFlashSale = prod.flash_sale_price && prod.game && isFlashActive(prod.game.flash_sale_end);
+                      const sell = isFlashSale ? parseFloat(prod.flash_sale_price!) : parseFloat(prod.price);
                       const markup = sell - cost;
                       const markupPct = cost > 0 ? Math.round((markup / cost) * 100) : 0;
 
@@ -3240,9 +3968,34 @@ export default function AdminDashboard() {
                           <td className="px-6 py-4 font-mono text-xs text-slate-500">{prod.buyer_sku_code}</td>
                           <td className="px-6 py-4 font-mono text-xs text-slate-600">{formatPrice(prod.original_price)}</td>
                           <td className="px-6 py-4 text-xs text-slate-500 font-semibold">{getProductMarkupLabel(prod)}</td>
-                          <td className="px-6 py-4 font-mono font-bold text-foreground">{formatPrice(prod.price)}</td>
-                          <td className="px-6 py-4 text-xs font-semibold text-success">
-                            {formatPrice(markup)} <span className="text-[10px] text-success/60 font-medium">({markupPct}%)</span>
+                          <td className="px-6 py-4 font-mono font-bold text-foreground">
+                            {isFlashSale ? (
+                              <div className="flex flex-col">
+                                <span className="line-through text-slate-400 text-[10px]">{formatPrice(prod.price)}</span>
+                                <span className="font-black text-[#e11d48]">{formatPrice(prod.flash_sale_price!)}</span>
+                              </div>
+                            ) : (
+                              formatPrice(prod.price)
+                            )}
+                          </td>
+                          <td className="px-6 py-4 font-mono font-semibold text-[#e11d48]">
+                             {prod.flash_sale_price ? formatPrice(prod.flash_sale_price) : '-'}
+                          </td>
+                          <td className="px-6 py-4 text-xs font-semibold">
+                            {isFlashSale ? (
+                              <div className="flex flex-col">
+                                <span className={markup < 0 ? 'text-error font-extrabold' : 'text-[#e11d48] font-extrabold'}>
+                                  {formatPrice(markup)} ({markupPct}%)
+                                </span>
+                                <span className="text-[8px] font-black text-[#e11d48] uppercase tracking-wider leading-none mt-1 bg-[#e11d48]/10 px-1.5 py-0.5 rounded border border-[#e11d48]/20 self-start">
+                                  Flash Sale Aktif
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-success font-semibold">
+                                {formatPrice(markup)} <span className="text-[10px] text-success/60 font-medium">({markupPct}%)</span>
+                              </span>
+                            )}
                           </td>
                           <td className="px-6 py-4">
                             {prod.is_available ? (
@@ -3361,13 +4114,275 @@ export default function AdminDashboard() {
                 </div>
               </form>
             </div>
-
-
           </div>
 
-          {/* Right Column: Balance Checker & Server IP */}
+          {/* Right Column: Server IP */}
           <div className="flex flex-col gap-6">
-            {/* Balance Checker Panel */}
+            {/* Server IP Card */}
+            <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm flex flex-col space-y-4">
+              <div>
+                <h2 className="text-base md:text-lg font-bold text-foreground font-heading mb-1">IP Server Anda</h2>
+                <p className="text-xs text-foreground/45">Daftarkan IP ini pada whitelist koneksi IP Digiflazz Anda</p>
+              </div>
+
+              <div className="bg-slate-50 p-4.5 rounded-2xl border border-slate-100 flex flex-col items-center justify-center space-y-2">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block leading-none">Alamat IP Publik</span>
+                <span className="text-sm md:text-base font-mono font-bold text-foreground select-all break-all text-center">
+                  {serverIp || 'Memuat...'}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCopyIp}
+                disabled={!serverIp}
+                className="w-full inline-flex items-center justify-center px-4 py-3 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 active:bg-slate-100 transition-colors uppercase tracking-wider cursor-pointer"
+              >
+                {copiedIp ? (
+                  <span className="text-success font-semibold flex items-center">
+                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    IP Berhasil Disalin
+                  </span>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 3h2a2 2 0 012 2v2m-6-4H8a2 2 0 00-2 2v2" />
+                    </svg>
+                    Salin IP Server
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: DIGIFLAZZ TOPUP */}
+      {activeTab === 'digiflazz_topup' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in duration-300 text-xs">
+          {/* Top Up Saldo Digiflazz Panel */}
+          <div className="md:col-span-2 space-y-6">
+            <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm flex flex-col space-y-4">
+              <div>
+                <h2 className="text-base md:text-lg font-bold text-foreground font-heading mb-1">Top Up Saldo Digiflazz</h2>
+                <p className="text-xs text-foreground/45">Buat tiket deposit saldo untuk ditransfer</p>
+              </div>
+
+              {!depositTicket ? (
+                <form onSubmit={handleRequestDeposit} className="space-y-3 text-left">
+                  <div>
+                    <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nominal Top Up</label>
+                    <input
+                      type="number"
+                      required
+                      min={200000}
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      placeholder="Minimal 200000"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:border-primary text-xs font-semibold text-foreground"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Tujuan Bank</label>
+                    <select
+                      value={depositBank}
+                      onChange={(e) => setDepositBank(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:border-primary text-xs font-semibold text-foreground cursor-pointer"
+                    >
+                      <option value="BCA">BCA (Perusahaan)</option>
+                      <option value="MANDIRI">MANDIRI (Perusahaan)</option>
+                      <option value="BRI">BRI (Perusahaan)</option>
+                      <option value="BNI">BNI (Perusahaan)</option>
+                      <option value="Flip">Flip (Perorangan)</option>
+                      <option value="ShopeePay">ShopeePay (Perorangan)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nama Pemilik Rekening Anda</label>
+                    <input
+                      type="text"
+                      required
+                      value={depositOwnerName}
+                      onChange={(e) => setDepositOwnerName(e.target.value)}
+                      placeholder="Nama Pengirim Transfer"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:border-primary text-xs font-semibold text-foreground"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={depositSubmitting}
+                    className="w-full mt-2 inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-dark text-white text-xs font-bold transition-colors uppercase tracking-wider cursor-pointer disabled:opacity-50"
+                  >
+                    {depositSubmitting ? 'Memproses...' : 'Buat Tiket Deposit'}
+                  </button>
+                </form>
+              ) : (
+                <div className="space-y-3.5 text-left animate-in fade-in duration-300">
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-[11px] text-amber-800 leading-relaxed font-medium">
+                    ⚠️ Silakan transfer dana tepat sesuai instruksi di bawah agar deposit dapat diverifikasi secara otomatis oleh Digiflazz.
+                  </div>
+
+                  <div className="bg-slate-50 rounded-xl border border-slate-100 p-4 space-y-3 font-mono text-[11px]">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-sans">Bank Tujuan</span>
+                      <span className="font-extrabold text-foreground">{depositTicket.bank} ({depositTicket.payment_method})</span>
+                    </div>
+
+                    <div className="flex flex-col gap-1 border-t border-slate-100 pt-2 relative">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-sans">Nomor Rekening</span>
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-foreground">{depositTicket.account_no}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyText(depositTicket.account_no, 'account')}
+                          className="text-[10px] font-sans font-bold text-primary hover:underline cursor-pointer"
+                        >
+                          {copiedDepositAccount ? 'Disalin' : 'Salin'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1 border-t border-slate-100 pt-2">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-sans">Nominal Wajib Transfer</span>
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-error text-xs">
+                          {formatPrice(depositTicket.amount)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyText(depositTicket.amount.toString(), 'amount')}
+                          className="text-[10px] font-sans font-bold text-primary hover:underline cursor-pointer"
+                        >
+                          {copiedDepositAmount ? 'Disalin' : 'Salin'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {depositTicket.notes && (
+                      <div className="flex flex-col gap-1 border-t border-slate-100 pt-2">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-sans">Berita / Keterangan Transfer</span>
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-foreground bg-slate-100 px-1.5 py-0.5 rounded">{depositTicket.notes}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyText(depositTicket.notes, 'notes')}
+                            className="text-[10px] font-sans font-bold text-primary hover:underline cursor-pointer"
+                          >
+                            {copiedDepositNotes ? 'Disalin' : 'Salin'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleCheckBalance()}
+                      className="flex-1 inline-flex items-center justify-center px-3 py-2.5 rounded-xl border border-slate-200 text-[10px] font-bold text-slate-600 hover:bg-slate-50 transition-colors uppercase tracking-wider cursor-pointer"
+                    >
+                      Cek Saldo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDepositTicket(null);
+                        setDepositAmount('');
+                        setDepositOwnerName('');
+                      }}
+                      className="flex-1 inline-flex items-center justify-center px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-[10px] font-bold text-slate-600 transition-colors uppercase tracking-wider cursor-pointer"
+                    >
+                      Buat Tiket Baru
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Riwayat Pengajuan Tiket Deposit */}
+            <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm space-y-4">
+              <div>
+                <h2 className="text-base md:text-lg font-bold text-foreground font-heading mb-1">Riwayat Pengajuan Tiket Deposit</h2>
+                <p className="text-xs text-foreground/45">Daftar tiket pengisian saldo Digiflazz yang telah diajukan</p>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse min-w-[500px]">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-[10px] text-foreground/50 uppercase tracking-wider font-bold">
+                      <th className="pb-3 pl-3">Waktu Pengajuan</th>
+                      <th className="pb-3">Pengirim</th>
+                      <th className="pb-3">Bank & Rekening Tujuan</th>
+                      <th className="pb-3 text-right">Nominal Transfer</th>
+                      <th className="pb-3 text-right pr-3">Keterangan</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {depositHistory.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="text-center py-8 text-foreground/40 font-medium">
+                          Belum ada riwayat tiket deposit yang diajukan.
+                        </td>
+                      </tr>
+                    ) : (
+                      depositHistory.map((item) => (
+                        <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="py-3 pl-3">
+                            <span className="font-semibold text-slate-700 block">
+                              {new Date(item.created_at).toLocaleDateString('id-ID', {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                              })}
+                            </span>
+                            <span className="text-[10px] text-slate-400 block font-mono">
+                              {new Date(item.created_at).toLocaleTimeString('id-ID', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          </td>
+                          <td className="py-3 font-semibold text-slate-800">
+                            {item.owner_name}
+                          </td>
+                          <td className="py-3">
+                            <span className="font-bold text-slate-700 block">{item.bank}</span>
+                            <span className="text-[10px] text-slate-400 font-mono block">{item.account_no}</span>
+                          </td>
+                          <td className="py-3 text-right font-extrabold text-error font-mono">
+                            {formatPrice(item.final_amount)}
+                            {item.final_amount !== item.amount && (
+                              <span className="text-[9px] text-slate-400 block font-sans font-normal">
+                                Base: {formatPrice(item.amount)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 text-right pr-3 text-slate-600 font-mono text-[10px] max-w-[180px] truncate" title={item.notes || ''}>
+                            {item.notes ? (
+                              <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200 inline-block select-all">
+                                {item.notes}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 font-sans">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Cek Saldo */}
+          <div className="flex flex-col gap-6">
             <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm flex flex-col justify-between space-y-5">
               <div>
                 <h2 className="text-base md:text-lg font-bold text-foreground font-heading mb-1">Cek Saldo</h2>
@@ -3395,6 +4410,7 @@ export default function AdminDashboard() {
               </div>
 
               <button
+                type="button"
                 onClick={handleCheckBalance}
                 disabled={checkingBalance}
                 className="w-full inline-flex items-center justify-center px-4 py-3 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors uppercase tracking-wider cursor-pointer"
@@ -3402,46 +4418,6 @@ export default function AdminDashboard() {
                 Cek Saldo Sekarang
               </button>
             </div>
-
-            {/* Server IP Card */}
-            <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm flex flex-col space-y-4">
-              <div>
-                <h2 className="text-base md:text-lg font-bold text-foreground font-heading mb-1">IP Server Anda</h2>
-                <p className="text-xs text-foreground/45">Daftarkan IP ini pada whitelist koneksi IP Digiflazz Anda</p>
-              </div>
-
-              <div className="bg-slate-50 p-4.5 rounded-2xl border border-slate-100 flex flex-col items-center justify-center space-y-2">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block leading-none">Alamat IP Publik</span>
-                <span className="text-sm md:text-base font-mono font-bold text-foreground select-all break-all text-center">
-                  {serverIp || 'Memuat...'}
-                </span>
-              </div>
-
-              <button
-                onClick={handleCopyIp}
-                disabled={!serverIp}
-                className="w-full inline-flex items-center justify-center px-4 py-3 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 active:bg-slate-100 transition-colors uppercase tracking-wider cursor-pointer"
-              >
-                {copiedIp ? (
-                  <span className="text-success font-semibold flex items-center">
-                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    IP Berhasil Disalin
-                  </span>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 3h2a2 2 0 012 2v2m-6-4H8a2 2 0 00-2 2v2" />
-                    </svg>
-                    Salin IP Server
-                  </>
-                )}
-              </button>
-            </div>
-
-
           </div>
         </div>
       )}
@@ -3451,6 +4427,8 @@ export default function AdminDashboard() {
       {activeTab === 'games' && renderGames()}
       {activeTab === 'vouchers' && renderVouchers()}
       {activeTab === 'announcements' && renderAnnouncements()}
+      {activeTab === 'flash_sales' && renderFlashSales()}
+      {activeTab === 'tickets' && renderTickets()}
 
       {activeTab === 'web_settings' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in duration-300 text-xs">
@@ -3542,7 +4520,9 @@ export default function AdminDashboard() {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <span className="text-slate-400 font-extrabold text-xl font-heading">YOI</span>
+                      <span className="text-slate-400 font-extrabold text-xl font-heading">
+                        {(webNameForm.replace(/[^a-zA-Z]/g, '').substring(0, 3).toUpperCase()) || 'YOI'}
+                      </span>
                     )}
                     {logoUploading && (
                       <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
@@ -3621,7 +4601,7 @@ export default function AdminDashboard() {
       {activeTab === 'payment_methods' && (
         <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm text-xs animate-in fade-in duration-300">
           <form onSubmit={handleSavePaymentMethodsSettings} className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
               <div>
                 <h2 className="text-base md:text-lg font-bold text-foreground font-heading">
                   Kelola Metode Pembayaran Transaksi (Checkout)
@@ -3630,20 +4610,27 @@ export default function AdminDashboard() {
                   Metode pembayaran di bawah akan muncul pada checkout user (Saldo selalu aktif).
                 </p>
               </div>
-              <div className="flex space-x-2">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0 lg:justify-end">
                 <button
                   type="button"
                   onClick={handleLoadDefaultPms}
-                  className="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 font-bold text-xs text-foreground transition-all cursor-pointer shadow-xs"
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 font-bold text-xs text-foreground transition-all cursor-pointer shadow-xs whitespace-nowrap text-center"
                 >
-                  💡 Muat Metode Default
+                  Muat Metode Default
                 </button>
                 <button
                   type="button"
                   onClick={() => handleOpenPmModal(null)}
-                  className="px-3 py-2 rounded-xl bg-primary hover:bg-primary-hover font-bold text-xs text-white transition-all cursor-pointer shadow-xs"
+                  className="px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-hover font-bold text-xs text-white transition-all cursor-pointer shadow-xs whitespace-nowrap text-center"
                 >
-                  ➕ Tambah Metode Baru
+                  Tambah Metode Baru
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteAllPms}
+                  className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 font-bold text-xs text-white transition-all cursor-pointer shadow-xs whitespace-nowrap text-center"
+                >
+                  Hapus Semua Metode
                 </button>
               </div>
             </div>
@@ -3659,21 +4646,22 @@ export default function AdminDashboard() {
                     {paymentMethods.filter((m: any) => m.type === 'E-Wallet').map((m: any) => {
                       const originalIndex = paymentMethods.findIndex((pm: any) => pm.id === m.id);
                       return (
-                        <div key={m.id} className="bg-white p-4 rounded-xl border border-slate-200 flex items-center justify-between shadow-xs">
-                          <div>
-                            <p className="font-bold text-slate-800 text-xs flex items-center gap-2">
-                              <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase border ${m.color || 'bg-slate-100 text-slate-600'}`}>
-                                {m.id}
-                              </span>
-                              <span>{m.name}</span>
-                            </p>
-                            <p className="text-xs text-foreground/40 mt-1.5">Biaya Admin: <strong>{formatPrice(m.fee)}</strong></p>
-                          </div>
-                          <div className="flex items-center space-x-2 shrink-0">
+                        <div key={m.id} className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between shadow-xs gap-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-bold text-slate-800 text-xs flex flex-wrap items-center gap-2">
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase border ${m.color || 'bg-slate-100 text-slate-600'} shrink-0`}>
+                                  {m.id}
+                                </span>
+                                <span className="truncate">{m.name}</span>
+                              </p>
+                              <p className="text-xs text-foreground/45 mt-1.5">Biaya Admin: <strong>{formatPrice(m.fee)}</strong></p>
+                            </div>
+                            
                             <button
                               type="button"
                               onClick={() => toggleMethodActive(originalIndex)}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer ${
+                              className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase transition-all cursor-pointer shrink-0 ${
                                 m.is_active 
                                   ? 'bg-success/15 text-success border border-success/20 hover:bg-success/25' 
                                   : 'bg-slate-100 text-slate-400 border border-slate-200 hover:bg-slate-250'
@@ -3681,21 +4669,24 @@ export default function AdminDashboard() {
                             >
                               {m.is_active ? 'Aktif' : 'Off'}
                             </button>
+                          </div>
+                          
+                          <div className="flex items-center justify-end space-x-2 pt-2.5 border-t border-slate-100">
                             <button
                               type="button"
                               onClick={() => handleOpenPmModal(m)}
-                              className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-600 cursor-pointer"
+                              className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-600 cursor-pointer font-bold text-[9px] uppercase tracking-wider transition-colors"
                               title="Edit"
                             >
-                              ✏️
+                              Edit
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeletePm(m.id)}
-                              className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 cursor-pointer"
+                              className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 cursor-pointer font-bold text-[9px] uppercase tracking-wider transition-colors"
                               title="Hapus"
                             >
-                              🗑️
+                              Hapus
                             </button>
                           </div>
                         </div>
@@ -3715,21 +4706,22 @@ export default function AdminDashboard() {
                     {paymentMethods.filter((m: any) => m.type === 'Transfer Bank').map((m: any) => {
                       const originalIndex = paymentMethods.findIndex((pm: any) => pm.id === m.id);
                       return (
-                        <div key={m.id} className="bg-white p-4 rounded-xl border border-slate-200 flex items-center justify-between shadow-xs">
-                          <div>
-                            <p className="font-bold text-slate-800 text-xs flex items-center gap-2">
-                              <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase border ${m.color || 'bg-slate-100 text-slate-600'}`}>
-                                {m.id.replace('VA_', '')}
-                              </span>
-                              <span>{m.name}</span>
-                            </p>
-                            <p className="text-xs text-foreground/40 mt-1.5">Biaya Admin: <strong>{formatPrice(m.fee)}</strong></p>
-                          </div>
-                          <div className="flex items-center space-x-2 shrink-0">
+                        <div key={m.id} className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between shadow-xs gap-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-bold text-slate-800 text-xs flex flex-wrap items-center gap-2">
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase border ${m.color || 'bg-slate-100 text-slate-600'} shrink-0`}>
+                                  {m.id.replace('VA_', '')}
+                                </span>
+                                <span className="truncate">{m.name}</span>
+                              </p>
+                              <p className="text-xs text-foreground/45 mt-1.5">Biaya Admin: <strong>{formatPrice(m.fee)}</strong></p>
+                            </div>
+                            
                             <button
                               type="button"
                               onClick={() => toggleMethodActive(originalIndex)}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer ${
+                              className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase transition-all cursor-pointer shrink-0 ${
                                 m.is_active 
                                   ? 'bg-success/15 text-success border border-success/20 hover:bg-success/25' 
                                   : 'bg-slate-100 text-slate-400 border border-slate-200 hover:bg-slate-250'
@@ -3737,21 +4729,24 @@ export default function AdminDashboard() {
                             >
                               {m.is_active ? 'Aktif' : 'Off'}
                             </button>
+                          </div>
+                          
+                          <div className="flex items-center justify-end space-x-2 pt-2.5 border-t border-slate-100">
                             <button
                               type="button"
                               onClick={() => handleOpenPmModal(m)}
-                              className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-600 cursor-pointer"
+                              className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-600 cursor-pointer font-bold text-[9px] uppercase tracking-wider transition-colors"
                               title="Edit"
                             >
-                              ✏️
+                              Edit
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeletePm(m.id)}
-                              className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 cursor-pointer"
+                              className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 cursor-pointer font-bold text-[9px] uppercase tracking-wider transition-colors"
                               title="Hapus"
                             >
-                              🗑️
+                              Hapus
                             </button>
                           </div>
                         </div>
@@ -4117,6 +5112,297 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+
+      {/* Edit Game (Brand) Modal Form */}
+      {gameModalOpen && editingGame && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-border overflow-hidden animate-in zoom-in duration-300 max-h-[90vh] flex flex-col text-xs">
+            <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
+              <h3 className="text-base font-bold text-foreground font-heading">
+                Pengaturan Brand: <span className="text-primary">{editingGame.name}</span>
+              </h3>
+              <button
+                onClick={() => setGameModalOpen(false)}
+                className="text-slate-400 hover:text-foreground focus:outline-none p-1 cursor-pointer"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <form onSubmit={handleSaveGame} className="flex-grow flex flex-col overflow-hidden">
+              <div className="p-5 overflow-y-auto flex-grow space-y-4">
+                <div className="flex items-center space-x-2 py-1">
+                  <input
+                    type="checkbox"
+                    id="game_is_active_checkbox"
+                    checked={gameForm.is_active}
+                    onChange={(e) => setGameForm({ ...gameForm, is_active: e.target.checked })}
+                    className="w-4 h-4 text-primary border-slate-300 rounded focus:ring-primary/20 cursor-pointer"
+                  />
+                  <label htmlFor="game_is_active_checkbox" className="text-xs font-semibold text-foreground/80 cursor-pointer select-none">
+                    Brand Aktif (Tampilkan di katalog halaman utama)
+                  </label>
+                </div>
+              </div>
+              <div className="p-5 border-t border-border shrink-0 flex items-center justify-end space-x-2 bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => setGameModalOpen(false)}
+                  className="px-4 py-2 border border-slate-200 rounded-lg text-slate-500 font-bold hover:bg-slate-100 transition-colors uppercase tracking-wider cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={gameSubmitting}
+                  className="px-4 py-2 bg-primary text-white rounded-lg font-bold hover:bg-primary-hover active:bg-primary-dark transition-colors uppercase tracking-wider cursor-pointer shadow-sm disabled:opacity-50"
+                >
+                  {gameSubmitting ? 'Menyimpan...' : 'Simpan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Edit Product Modal Form */}
+      {editingProduct && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-border overflow-hidden animate-in zoom-in duration-300 max-h-[95vh] flex flex-col text-xs">
+            <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
+              <h3 className="text-base font-bold text-foreground font-heading">
+                Atur Harga & Markup: <span className="text-primary">{editingProduct.name}</span>
+              </h3>
+              <button
+                onClick={() => setEditingProduct(null)}
+                className="text-slate-400 hover:text-foreground focus:outline-none p-1 cursor-pointer"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <form onSubmit={handleSaveProduct} className="flex-grow flex flex-col overflow-hidden">
+              <div className="p-5 overflow-y-auto flex-grow space-y-4">
+                
+                {/* Cost Info */}
+                <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <div>
+                    <span className="block text-[10px] font-bold text-foreground/50 uppercase mb-1">Harga Modal (Provider)</span>
+                    <span className="block font-mono font-black text-slate-600 text-sm leading-none pt-1">{formatPrice(editingProduct.original_price)}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-bold text-foreground/50 uppercase mb-1">Estimasi Harga Jual</span>
+                    <span className="block font-mono font-black text-success text-sm leading-none pt-1">{formatPrice(calculatePreviewPrice())}</span>
+                  </div>
+                </div>
+
+                {/* Markup Settings */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Tipe Keuntungan (Markup)</label>
+                    <select
+                      value={productForm.markup_type}
+                      onChange={(e) => setProductForm({ ...productForm, markup_type: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-semibold cursor-pointer"
+                    >
+                      <option value="global">Ikuti Global</option>
+                      <option value="percent">Persentase (%)</option>
+                      <option value="flat">Rupiah (Flat IDR)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Nilai Keuntungan</label>
+                    <input
+                      type="number"
+                      required
+                      disabled={productForm.markup_type === 'global'}
+                      value={productForm.markup_value}
+                      onChange={(e) => setProductForm({ ...productForm, markup_value: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-bold disabled:opacity-50"
+                    />
+                  </div>
+                </div>
+
+                {/* Flash Sale Price */}
+                <div>
+                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Harga Flash Sale (Opsional)</label>
+                  <input
+                    type="number"
+                    placeholder="Masukkan harga promo, cth: 15000"
+                    value={productForm.flash_sale_price}
+                    onChange={(e) => setProductForm({ ...productForm, flash_sale_price: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-bold"
+                  />
+                  {/* Estimasi Margin Profit Flash Sale */}
+                  {productForm.flash_sale_price && parseFloat(productForm.flash_sale_price) > 0 && (
+                    <div className="mt-2 text-[10px] font-semibold flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                      <span className="text-slate-500">Estimasi Margin Profit Flash Sale:</span>
+                      {(() => {
+                        const cost = parseFloat(editingProduct.original_price) || 0;
+                        const flashPrice = parseFloat(productForm.flash_sale_price) || 0;
+                        const margin = flashPrice - cost;
+                        const pct = cost > 0 ? Math.round((margin / cost) * 100) : 0;
+                        const isNegative = margin < 0;
+                        return (
+                          <span className={isNegative ? 'text-error font-black animate-pulse' : 'text-success font-black'}>
+                            {formatPrice(margin)} ({pct}%)
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  )}
+                  <p className="text-[9px] text-foreground/45 mt-1 leading-relaxed">
+                    *Harga promo ini hanya akan aktif jika periode flash sale pada brand game produk ini diaktifkan.
+                  </p>
+                </div>
+
+                {/* Product Availability */}
+                <div>
+                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Status Stok / Ketersediaan</label>
+                  <select
+                    value={productForm.is_available ? '1' : '0'}
+                    onChange={(e) => setProductForm({ ...productForm, is_available: e.target.value === '1' })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-semibold cursor-pointer"
+                  >
+                    <option value="1">Aktif / Tersedia</option>
+                    <option value="0">Nonaktif / Kosong</option>
+                  </select>
+                </div>
+
+              </div>
+
+              <div className="p-5 border-t border-border shrink-0 flex items-center justify-end space-x-2 bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => setEditingProduct(null)}
+                  className="px-4 py-2 border border-slate-200 rounded-lg text-slate-500 font-bold hover:bg-slate-100 transition-colors uppercase tracking-wider cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={productSubmitting}
+                  className="px-4 py-2 bg-primary text-white rounded-lg font-bold hover:bg-primary-hover active:bg-primary-dark transition-colors uppercase tracking-wider cursor-pointer shadow-sm disabled:opacity-50"
+                >
+                  {productSubmitting ? 'Menyimpan...' : 'Simpan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Flash Sale Modal Form */}
+      {editingFlashSaleProduct && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-border overflow-hidden animate-in zoom-in duration-300 max-h-[95vh] flex flex-col text-xs">
+            <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
+              <h3 className="text-base font-bold text-foreground font-heading">
+                Pengaturan Flash Sale: <span className="text-primary">{editingFlashSaleProduct.name}</span>
+              </h3>
+              <button
+                onClick={() => setEditingFlashSaleProduct(null)}
+                className="text-slate-400 hover:text-foreground focus:outline-none p-1 cursor-pointer"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <form onSubmit={handleSaveFlashSale} className="flex-grow flex flex-col overflow-hidden">
+              <div className="p-5 overflow-y-auto flex-grow space-y-4">
+                
+                {/* Cost & Normal Price Info */}
+                <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <div>
+                    <span className="block text-[10px] font-bold text-foreground/50 uppercase mb-1">Harga Modal</span>
+                    <span className="block font-mono font-black text-slate-600 text-sm leading-none pt-1">
+                      {formatPrice(editingFlashSaleProduct.original_price)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-bold text-foreground/50 uppercase mb-1">Harga Reguler (Jual)</span>
+                    <span className="block font-mono font-black text-slate-700 text-sm leading-none pt-1">
+                      {formatPrice(editingFlashSaleProduct.price)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Flash Sale Price */}
+                <div>
+                  <label className="block text-[10px] font-bold text-[#e11d48] uppercase tracking-wider mb-2">Harga Flash Sale (IDR)</label>
+                  <input
+                    type="number"
+                    placeholder="Masukkan harga promo, kosongkan untuk hapus promo"
+                    value={flashSaleForm.price}
+                    onChange={(e) => setFlashSaleForm({ ...flashSaleForm, price: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-[#e11d48] text-foreground font-bold"
+                  />
+                  {/* Estimasi Margin Profit Flash Sale */}
+                  {flashSaleForm.price && parseFloat(flashSaleForm.price) > 0 && (
+                    <div className="mt-2 text-[10px] font-semibold flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                      <span className="text-slate-500">Estimasi Margin Profit Flash Sale:</span>
+                      {(() => {
+                        const { margin, pct, isNegative } = calculateFlashSaleMargin();
+                        return (
+                          <span className={isNegative ? 'text-error font-black animate-pulse' : 'text-success font-black'}>
+                            {formatPrice(margin)} ({pct}%)
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  )}
+                  {flashSaleFormErrors.price && (
+                    <p className="text-error mt-1 text-[10px] font-semibold">{flashSaleFormErrors.price[0]}</p>
+                  )}
+                </div>
+
+                {/* Flash Sale End Time */}
+                <div>
+                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">
+                    Batas Waktu Flash Sale
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={flashSaleForm.end}
+                    onChange={(e) => setFlashSaleForm({ ...flashSaleForm, end: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-bold"
+                  />
+                  <p className="text-[9px] text-foreground/45 mt-1 leading-relaxed">
+                    *Tentukan kapan periode flash sale untuk brand <strong>{editingFlashSaleProduct.game?.name || 'ini'}</strong> berakhir. Kosongkan untuk menonaktifkan flash sale pada brand ini.
+                  </p>
+                  {flashSaleFormErrors.end && (
+                    <p className="text-error mt-1 text-[10px] font-semibold">{flashSaleFormErrors.end[0]}</p>
+                  )}
+                </div>
+
+              </div>
+
+              <div className="p-5 border-t border-border shrink-0 flex items-center justify-end space-x-2 bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => setEditingFlashSaleProduct(null)}
+                  className="px-4 py-2 border border-slate-200 rounded-lg text-slate-500 font-bold hover:bg-slate-100 transition-colors uppercase tracking-wider cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={flashSaleSubmitting}
+                  className="px-4 py-2 bg-primary text-white rounded-lg font-bold hover:bg-primary-hover active:bg-primary-dark transition-colors uppercase tracking-wider cursor-pointer shadow-sm disabled:opacity-50"
+                >
+                  {flashSaleSubmitting ? 'Menyimpan...' : 'Simpan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+      )}
+
       {/* Custom Confirmation Modal */}
       {confirmModal.isOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -4274,6 +5560,12 @@ export default function AdminDashboard() {
                     {selectedTxForDetail.target_id} {selectedTxForDetail.target_zone ? `(${selectedTxForDetail.target_zone})` : ''}
                   </span>
                 </div>
+                {selectedTxForDetail.nickname && (
+                  <div className="flex justify-between py-1 border-b border-slate-50 text-emerald-600 dark:text-emerald-400">
+                    <span className="text-slate-400">Nickname Akun:</span>
+                    <span className="font-extrabold">{selectedTxForDetail.nickname}</span>
+                  </div>
+                )}
                 <div className="flex justify-between py-1 border-b border-slate-50">
                   <span className="text-slate-400">Metode Pembayaran:</span>
                   <span className="font-bold text-slate-800 uppercase">{selectedTxForDetail.payment_method}</span>

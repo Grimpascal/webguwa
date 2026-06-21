@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { api, Game } from '@/services/api';
+import { api, Game, getAssetUrl } from '@/services/api';
 
 export default function Home() {
   const router = useRouter();
@@ -12,6 +12,19 @@ export default function Home() {
   const [searchInvoice, setSearchInvoice] = useState('');
   const [error, setError] = useState('');
   const [webName, setWebName] = useState('YOI Store');
+  
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const scroll = (direction: 'left' | 'right') => {
+    if (scrollContainerRef.current) {
+      const { scrollLeft, clientWidth } = scrollContainerRef.current;
+      const scrollAmount = clientWidth * 0.75;
+      scrollContainerRef.current.scrollTo({
+        left: direction === 'left' ? scrollLeft - scrollAmount : scrollLeft + scrollAmount,
+        behavior: 'smooth'
+      });
+    }
+  };
 
   useEffect(() => {
     async function loadGames() {
@@ -81,7 +94,7 @@ export default function Home() {
 
         <div className="container mx-auto px-4 text-center max-w-4xl">
           <span className="accent-badge px-3 py-1.5 rounded-full text-xs uppercase tracking-widest inline-block mb-4">
-            🚀 PROSES OTOMATIS 24 JAM
+            PROSES OTOMATIS 24 JAM
           </span>
           <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-foreground font-heading mb-6 leading-tight">
             Top Up Game Favoritmu <br />
@@ -116,7 +129,7 @@ export default function Home() {
       {/* Games Catalog Section */}
       <section id="games" className="py-12 bg-white flex-grow">
         <div className="container mx-auto px-4 max-w-6xl">
-          <div className="border-b border-border pb-5 mb-8 flex flex-col sm:flex-row sm:items-end justify-between">
+          <div className="border-b border-border pb-5 mb-8 flex items-end justify-between">
             <div>
               <h2 className="text-2xl md:text-3xl font-extrabold text-foreground font-heading">
                 Katalog Top Up Game
@@ -125,8 +138,30 @@ export default function Home() {
                 Pilih game favoritmu dan isi nominal yang kamu inginkan
               </p>
             </div>
-            <div className="mt-4 sm:mt-0 text-xs text-foreground/40 font-medium">
-              Update otomatis dari Digiflazz
+            <div className="flex items-center space-x-4">
+              <div className="hidden sm:flex items-center space-x-2">
+                <button
+                  onClick={() => scroll('left')}
+                  className="w-9 h-9 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-primary flex items-center justify-center transition-all cursor-pointer shadow-xs dark:bg-slate-900 dark:border-slate-800"
+                  aria-label="Scroll Left"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => scroll('right')}
+                  className="w-9 h-9 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-primary flex items-center justify-center transition-all cursor-pointer shadow-xs dark:bg-slate-900 dark:border-slate-800"
+                  aria-label="Scroll Right"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+              <div className="text-xs text-foreground/40 font-medium">
+                Update otomatis
+              </div>
             </div>
           </div>
 
@@ -137,9 +172,9 @@ export default function Home() {
           )}
 
           {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6">
-              {[1, 2, 3].map((n) => (
-                <div key={n} className="animate-pulse border border-slate-100 rounded-2xl p-6 flex flex-col items-center space-y-4">
+            <div className="flex overflow-x-auto gap-6 pb-6 pt-2 scrollbar-none snap-x snap-mandatory scroll-smooth -mx-4 px-4 sm:mx-0 sm:px-0">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <div key={n} className="w-[165px] sm:w-[210px] shrink-0 snap-start animate-pulse border border-slate-100 rounded-2xl p-6 flex flex-col items-center space-y-4">
                   <div className="w-16 h-16 bg-slate-100 rounded-2xl" />
                   <div className="h-4 bg-slate-100 w-24 rounded-md" />
                   <div className="h-3 bg-slate-100 w-16 rounded-md" />
@@ -147,15 +182,18 @@ export default function Home() {
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6">
+            <div 
+              ref={scrollContainerRef}
+              className="flex overflow-x-auto gap-6 pb-6 pt-2 scrollbar-none snap-x snap-mandatory scroll-smooth -mx-4 px-4 sm:mx-0 sm:px-0"
+            >
               {games.length === 0 ? (
-                <div className="col-span-full text-center py-12 text-foreground/50 text-sm">
+                <div className="w-full text-center py-12 text-foreground/50 text-sm shrink-0">
                   Tidak ada game yang aktif saat ini.
                 </div>
               ) : (
                 games.map((game) => (
-                  <Link key={game.id} href={`/game/${game.slug}`} className="group">
-                    <div className="premium-card rounded-2xl p-6 flex flex-col items-center text-center cursor-pointer relative overflow-hidden bg-white">
+                  <Link key={game.id} href={`/game/${game.slug}`} className="group w-[165px] sm:w-[210px] shrink-0 snap-start">
+                    <div className="premium-card rounded-2xl p-6 flex flex-col items-center text-center cursor-pointer relative overflow-hidden bg-white min-h-[210px] sm:min-h-[230px] justify-center">
                       {/* Accent glow on card hover */}
                       <div className="absolute -top-12 -right-12 w-24 h-24 bg-primary/5 rounded-full group-hover:bg-primary/10 transition-colors blur-xl" />
 
@@ -163,7 +201,7 @@ export default function Home() {
                       <div className="mb-4 transform group-hover:scale-105 transition-transform duration-300">
                         {game.thumbnail ? (
                           <img
-                            src={`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'}${game.thumbnail}`}
+                            src={getAssetUrl(game.thumbnail)}
                             alt={game.name}
                             className="w-16 h-16 rounded-2xl object-cover shadow-md border border-slate-200"
                           />
@@ -173,18 +211,18 @@ export default function Home() {
                       </div>
 
                       {/* Title */}
-                      <h3 className="font-bold text-foreground font-heading group-hover:text-primary transition-colors text-base">
+                      <h3 className="font-bold text-foreground font-heading group-hover:text-primary transition-colors text-sm sm:text-base line-clamp-2">
                         {game.name}
                       </h3>
                       
                       {/* Subtitle */}
-                      <span className="text-xs text-foreground/40 mt-1 font-medium">
+                      <span className="text-[10px] sm:text-xs text-foreground/40 mt-1 font-medium">
                         Instant Delivery
                       </span>
 
                       {/* Hover Arrow */}
-                      <span className="mt-4 inline-flex items-center text-xs text-primary font-bold opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                        Top Up Sekarang &rarr;
+                      <span className="mt-3.5 inline-flex items-center text-[10px] sm:text-xs text-primary font-bold opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        Top Up &rarr;
                       </span>
                     </div>
                   </Link>

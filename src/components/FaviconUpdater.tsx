@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { api } from '@/services/api';
+import { api, getAssetUrl } from '@/services/api';
 
 let cachedWebName = '';
 let cachedFavicon = '';
@@ -41,7 +41,7 @@ export default function FaviconUpdater() {
       link.rel = 'icon';
       document.head.appendChild(link);
     }
-    link.href = `${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'}${faviconUrl}`;
+    link.href = getAssetUrl(faviconUrl);
   };
 
   // Re-run when pathname changes to ensure title remains custom

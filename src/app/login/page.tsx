@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -37,22 +38,12 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
-      await login({ email, password });
+      await login({ email, password, rememberMe });
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Email atau password salah. Silakan coba lagi.');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleQuickFill = (role: 'admin' | 'user') => {
-    if (role === 'admin') {
-      setEmail('admin@yoi.com');
-      setPassword('password');
-    } else {
-      setEmail('user@yoi.com');
-      setPassword('password');
     }
   };
 
@@ -137,6 +128,18 @@ export default function LoginPage() {
                 </button>
               </div>
             </div>
+
+            <div className="flex items-center justify-between text-xs py-1">
+              <label className="flex items-center space-x-2 text-foreground/70 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-4 h-4 text-primary border-slate-300 rounded focus:ring-primary/20 cursor-pointer"
+                />
+                <span className="font-semibold">Ingat Saya</span>
+              </label>
+            </div>
           </div>
 
           <div>
@@ -160,28 +163,6 @@ export default function LoginPage() {
           </div>
         </form>
 
-        {/* Demo Accounts Panel */}
-        <div className="mt-8 border-t border-border pt-6">
-          <p className="text-xs font-bold text-foreground/50 uppercase tracking-widest text-center mb-3">
-            Akun Percobaan (Demo)
-          </p>
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <button
-              onClick={() => handleQuickFill('user')}
-              className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-primary-light hover:border-primary/30 transition-all text-center cursor-pointer group"
-            >
-              <span className="font-bold text-foreground group-hover:text-primary transition-colors">Role: Pengguna Biasa</span>
-              <span className="text-[10px] text-slate-500 mt-1">user@yoi.com</span>
-            </button>
-            <button
-              onClick={() => handleQuickFill('admin')}
-              className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-primary-light hover:border-primary/30 transition-all text-center cursor-pointer group"
-            >
-              <span className="font-bold text-foreground group-hover:text-primary transition-colors">Role: Admin</span>
-              <span className="text-[10px] text-slate-500 mt-1">admin@yoi.com</span>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

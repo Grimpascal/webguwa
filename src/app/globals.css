@@ -20,6 +20,52 @@
   --success: #10b981;
   --warning: #f59e0b;
   --error: #ef4444;
+
+  /* Neutrals for light theme */
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #0f172a;
+}
+
+.dark {
+  --background: #0b0f19;
+  --foreground: #f8fafc;
+  
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-light: #1e293b;
+  
+  --accent: #ffd700;
+  --accent-hover: #eab308;
+  --accent-light: #1e293b;
+  
+  --muted: #131b2e;
+  --border: #1e293b;
+  --card: #0f172a;
+  --card-foreground: #f8fafc;
+  
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error: #ef4444;
+
+  /* Neutrals for dark theme */
+  --slate-50: #0b0f19;
+  --slate-100: #131b2e;
+  --slate-200: #1e293b;
+  --slate-300: #334155;
+  --slate-400: #475569;
+  --slate-500: #64748b;
+  --slate-600: #94a3b8;
+  --slate-700: #cbd5e1;
+  --slate-800: #e2e8f0;
+  --slate-900: #f8fafc;
 }
 
 @theme {
@@ -51,6 +97,7 @@ body {
   background: var(--background);
   color: var(--foreground);
   min-height: 100vh;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Micro-animations and premium details */
@@ -92,4 +139,258 @@ body {
 
 .light-glow {
   box-shadow: 0 0 50px -10px rgba(30, 136, 229, 0.08);
+}
+
+/* Class name overrides for dark mode */
+.dark .bg-white {
+  background-color: var(--card) !important;
+}
+.dark .bg-slate-50 {
+  background-color: var(--slate-50) !important;
+}
+.dark .bg-slate-100 {
+  background-color: var(--slate-100) !important;
+}
+.dark .bg-slate-200 {
+  background-color: var(--slate-200) !important;
+}
+.dark .bg-slate-300 {
+  background-color: var(--slate-300) !important;
+}
+.dark .border-slate-100 {
+  border-color: var(--slate-100) !important;
+}
+.dark .border-slate-200 {
+  border-color: var(--slate-200) !important;
+}
+.dark .border-slate-300 {
+  border-color: var(--slate-300) !important;
+}
+.dark .border-slate-400 {
+  border-color: var(--slate-400) !important;
+}
+.dark .border-border {
+  border-color: var(--border) !important;
+}
+
+.dark .text-slate-900 {
+  color: var(--slate-900) !important;
+}
+.dark .text-slate-800 {
+  color: var(--slate-800) !important;
+}
+.dark .text-slate-700 {
+  color: var(--slate-700) !important;
+}
+.dark .text-slate-600 {
+  color: var(--slate-600) !important;
+}
+.dark .text-slate-500 {
+  color: var(--slate-500) !important;
+}
+.dark .text-slate-400 {
+  color: var(--slate-400) !important;
+}
+.dark .text-slate-300 {
+  color: var(--slate-300) !important;
+}
+.dark .text-slate-200 {
+  color: var(--slate-200) !important;
+}
+.dark .text-slate-100 {
+  color: var(--slate-100) !important;
+}
+.dark .text-slate-50 {
+  color: var(--slate-50) !important;
+}
+.dark .text-foreground {
+  color: var(--foreground) !important;
+}
+.dark .text-foreground\/85 {
+  color: rgba(248, 250, 252, 0.85) !important;
+}
+.dark .text-foreground\/80 {
+  color: rgba(248, 250, 252, 0.8) !important;
+}
+.dark .text-foreground\/60 {
+  color: rgba(248, 250, 252, 0.6) !important;
+}
+.dark .text-foreground\/45 {
+  color: rgba(248, 250, 252, 0.45) !important;
+}
+.dark .text-foreground\/50 {
+  color: rgba(248, 250, 252, 0.5) !important;
+}
+
+/* Gradients and specific overlay backgrounds */
+.dark .bg-gradient-to-b.from-primary-light\/20 {
+  background-image: linear-gradient(to bottom, rgba(30, 41, 59, 0.2) 0%, var(--background) 100%) !important;
+}
+.dark .bg-gradient-to-b.from-primary-light\/40 {
+  background-image: linear-gradient(to bottom, rgba(30, 41, 59, 0.4) 0%, var(--background) 100%) !important;
+}
+.dark .via-white {
+  --tw-gradient-via: var(--background) !important;
+}
+.dark .to-white {
+  --tw-gradient-to: var(--background) !important;
+}
+.dark .bg-white\/75 {
+  background-color: rgba(15, 23, 42, 0.75) !important;
+}
+.dark .bg-white\/80 {
+  background-color: rgba(15, 23, 42, 0.8) !important;
+}
+.dark .bg-slate-900\/40 {
+  background-color: rgba(11, 15, 25, 0.6) !important;
+}
+.dark .bg-slate-50\/50 {
+  background-color: rgba(19, 27, 46, 0.5) !important;
+}
+.dark .bg-slate-100\/70 {
+  background-color: rgba(30, 41, 59, 0.5) !important;
+}
+.dark .bg-amber-50\/30 {
+  background-color: rgba(245, 158, 11, 0.1) !important;
+}
+.dark .bg-amber-50\/50 {
+  background-color: rgba(245, 158, 11, 0.15) !important;
+}
+.dark .border-amber-100 {
+  border-color: rgba(245, 158, 11, 0.3) !important;
+}
+
+/* Colors for specific payment badges and components */
+/* Blue */
+.dark .bg-blue-50 {
+  background-color: rgba(59, 130, 246, 0.12) !important;
+}
+.dark .text-blue-500, .dark .text-blue-600, .dark .text-blue-700, .dark .text-blue-800 {
+  color: #60a5fa !important;
+}
+.dark .border-blue-200 {
+  border-color: rgba(59, 130, 246, 0.3) !important;
+}
+.dark .bg-blue-100 {
+  background-color: rgba(59, 130, 246, 0.18) !important;
+}
+
+/* Purple */
+.dark .bg-purple-50 {
+  background-color: rgba(168, 85, 247, 0.12) !important;
+}
+.dark .text-purple-500, .dark .text-purple-600, .dark .text-purple-700 {
+  color: #c084fc !important;
+}
+.dark .border-purple-200 {
+  border-color: rgba(168, 85, 247, 0.3) !important;
+}
+
+/* Emerald */
+.dark .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+}
+.dark .text-emerald-500, .dark .text-emerald-600, .dark .text-emerald-700 {
+  color: #34d399 !important;
+}
+.dark .border-emerald-200 {
+  border-color: rgba(16, 185, 129, 0.3) !important;
+}
+
+/* Orange/Amber */
+.dark .bg-orange-50, .dark .bg-amber-50 {
+  background-color: rgba(249, 115, 22, 0.12) !important;
+}
+.dark .text-orange-500, .dark .text-orange-600, .dark .text-orange-700, .dark .text-amber-500, .dark .text-amber-600, .dark .text-amber-700, .dark .text-amber-800, .dark .text-amber-900 {
+  color: #fb923c !important;
+}
+.dark .border-orange-200, .dark .border-amber-200 {
+  border-color: rgba(249, 115, 22, 0.3) !important;
+}
+
+/* Red/Rose */
+.dark .bg-red-50, .dark .bg-rose-50 {
+  background-color: rgba(239, 68, 68, 0.12) !important;
+}
+.dark .text-red-500, .dark .text-red-600, .dark .text-rose-500 {
+  color: #f87171 !important;
+}
+.dark .border-red-200, .dark .border-rose-200 {
+  border-color: rgba(239, 68, 68, 0.3) !important;
+}
+
+/* Yellow */
+.dark .bg-yellow-50 {
+  background-color: rgba(234, 179, 8, 0.12) !important;
+}
+.dark .text-yellow-500, .dark .text-yellow-600 {
+  color: #facc15 !important;
+}
+.dark .border-yellow-200 {
+  border-color: rgba(234, 179, 8, 0.3) !important;
+}
+
+/* Green */
+.dark .bg-green-50 {
+  background-color: rgba(34, 197, 94, 0.12) !important;
+}
+.dark .text-green-500, .dark .text-green-600, .dark .text-green-700 {
+  color: #4ade80 !important;
+}
+.dark .border-green-200 {
+  border-color: rgba(34, 197, 94, 0.3) !important;
+}
+
+/* Form Inputs, Select, Textareas */
+.dark input, .dark select, .dark textarea {
+  color: var(--foreground) !important;
+  background-color: var(--slate-50) !important;
+  border-color: var(--slate-200) !important;
+}
+.dark input:focus, .dark select:focus, .dark textarea:focus {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15) !important;
+}
+.dark ::placeholder, .dark input::placeholder, .dark textarea::placeholder {
+  color: var(--slate-400) !important;
+  opacity: 0.8 !important;
+}
+
+/* Hover overrides for interaction states in dark mode */
+.dark .hover\:bg-slate-50\/50:hover {
+  background-color: rgba(30, 41, 59, 0.25) !important;
+}
+.dark .hover\:bg-slate-100\/70:hover {
+  background-color: rgba(30, 41, 59, 0.45) !important;
+}
+.dark .hover\:bg-slate-50:hover {
+  background-color: var(--slate-100) !important;
+}
+.dark .hover\:bg-slate-100:hover {
+  background-color: var(--slate-200) !important;
+}
+.dark .hover\:bg-slate-200:hover {
+  background-color: var(--slate-300) !important;
+}
+.dark .hover\:bg-primary-light\/10:hover {
+  background-color: rgba(59, 130, 246, 0.15) !important;
+}
+.dark .hover\:bg-primary-light\/5:hover {
+  background-color: rgba(59, 130, 246, 0.08) !important;
+}
+.dark .hover\:bg-primary-light:hover {
+  background-color: rgba(59, 130, 246, 0.25) !important;
+}
+.dark .hover\:text-primary:hover {
+  color: var(--primary) !important;
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+/* Hide scrollbar for IE, Edge and Firefox */
+.scrollbar-none {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
 }

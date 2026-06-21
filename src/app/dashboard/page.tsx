@@ -3,10 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { api, Transaction, Game, TopupMethod, TopupRequest, Announcement } from '@/services/api';
+import { api, Transaction, Game, TopupMethod, TopupRequest, Announcement, getAssetUrl, Ticket, TicketMessage } from '@/services/api';
 import Link from 'next/link';
 
-type TabType = 'dashboard' | 'topup' | 'transactions' | 'topup_history' | 'profile';
+type TabType = 'dashboard' | 'topup' | 'transactions' | 'topup_history' | 'profile' | 'developer' | 'tickets';
 
 const CATEGORIES = [
   { id: 'games', name: 'Game Voucher', icon: '🎮', color: 'bg-primary/10 text-primary' },
@@ -30,6 +30,7 @@ export default function UserDashboard() {
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
+  const [menuOpen, setMenuOpen] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [games, setGames] = useState<Game[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -55,6 +56,203 @@ export default function UserDashboard() {
   const [txStatus, setTxStatus] = useState('all');
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
 
+  // Profile Edit states
+  const [profileName, setProfileName] = useState('');
+  const [profilePassword, setProfilePassword] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState('');
+
+  // Developer API states
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  const [generatingKey, setGeneratingKey] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void | Promise<void>;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
+
+  // Support Tickets states
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const repliedTicketsCount = tickets.filter(t => t.status === 'replied').length;
+  const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
+  const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
+  const [ticketMessage, setTicketMessage] = useState('');
+  const [ticketTitle, setTicketTitle] = useState('');
+  const [ticketCategory, setTicketCategory] = useState<'transaksi' | 'topup' | 'akun' | 'lainnya'>('transaksi');
+  const [ticketInitialMsg, setTicketInitialMsg] = useState('');
+  const [ticketSubmitting, setTicketSubmitting] = useState(false);
+  const [ticketReplySubmitting, setTicketReplySubmitting] = useState(false);
+  const [showNewTicketForm, setShowNewTicketForm] = useState(false);
+  const [loadingTicketDetail, setLoadingTicketDetail] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setProfileName(user.name);
+    }
+  }, [user]);
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profileName.trim()) {
+      setProfileError('Nama lengkap harus diisi.');
+      return;
+    }
+    
+    setSavingProfile(true);
+    setProfileError('');
+    try {
+      const payload: { name: string; password?: string } = {
+        name: profileName.trim(),
+      };
+      if (profilePassword) {
+        if (profilePassword.length < 8) {
+          setProfileError('Password minimal harus 8 karakter.');
+          setSavingProfile(false);
+          return;
+        }
+        payload.password = profilePassword;
+      }
+      
+      await api.updateProfile(payload);
+      setSuccessMsg('Profil Anda berhasil diperbarui!');
+      setProfilePassword('');
+      await refreshUser();
+      
+      setTimeout(() => {
+        setSuccessMsg('');
+      }, 3000);
+    } catch (err: any) {
+      console.error('Failed to update profile:', err);
+      setProfileError(err.message || 'Gagal memperbarui profil.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleGenerateApiKey = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Buat API Key Baru',
+      message: 'Apakah Anda yakin ingin membuat/regenerasi API Key baru? API Key lama Anda tidak akan dapat digunakan lagi.',
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        setGeneratingKey(true);
+        try {
+          await api.generateApiKey();
+          setSuccessMsg('API Key baru berhasil dibuat!');
+          await refreshUser(); // Refresh user data to load new api_token
+        } catch (err: any) {
+          console.error(err);
+          setError(err.message || 'Gagal membuat API Key.');
+        } finally {
+          setGeneratingKey(false);
+        }
+      }
+    });
+  };
+
+  const handleSelectTicket = async (id: number) => {
+    setSelectedTicketId(id);
+    setLoadingTicketDetail(true);
+    setError('');
+    try {
+      const data = await api.getTicket(id);
+      setActiveTicket(data);
+    } catch (err: any) {
+      console.error(err);
+      setError('Gagal memuat detail tiket.');
+    } finally {
+      setLoadingTicketDetail(false);
+    }
+  };
+
+  const handleReplyTicketSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ticketMessage.trim() || !selectedTicketId) return;
+
+    setTicketReplySubmitting(true);
+    try {
+      await api.replyTicket(selectedTicketId, ticketMessage.trim());
+      setTicketMessage('');
+      // Reload ticket detail
+      const updatedTicket = await api.getTicket(selectedTicketId);
+      setActiveTicket(updatedTicket);
+      
+      // Reload list of tickets to update order/status
+      const ticketList = await api.getUserTickets();
+      setTickets(ticketList);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Gagal membalas tiket.');
+    } finally {
+      setTicketReplySubmitting(false);
+    }
+  };
+
+  const handleCreateTicketSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ticketTitle.trim() || !ticketInitialMsg.trim()) {
+      setError('Harap isi semua kolom');
+      return;
+    }
+
+    setTicketSubmitting(true);
+    setError('');
+    try {
+      const newTicket = await api.createTicket({
+        title: ticketTitle.trim(),
+        category: ticketCategory,
+        message: ticketInitialMsg.trim()
+      });
+      setTicketTitle('');
+      setTicketInitialMsg('');
+      setTicketCategory('transaksi');
+      setShowNewTicketForm(false);
+      
+      // Reload list and select new ticket
+      const ticketList = await api.getUserTickets();
+      setTickets(ticketList);
+      
+      handleSelectTicket(newTicket.id);
+      setSuccessMsg('Tiket bantuan berhasil dibuat.');
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Gagal membuat tiket bantuan.');
+    } finally {
+      setTicketSubmitting(false);
+    }
+  };
+
+  const handleCloseTicket = async (id: number) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Tutup Tiket',
+      message: 'Apakah Anda yakin ingin menutup tiket bantuan ini? Status tiket akan diubah menjadi Ditutup.',
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        try {
+          await api.closeTicket(id);
+          setSuccessMsg('Tiket berhasil ditutup.');
+          
+          // Reload ticket detail and list
+          const updatedTicket = await api.getTicket(id);
+          setActiveTicket(updatedTicket);
+          const ticketList = await api.getUserTickets();
+          setTickets(ticketList);
+        } catch (err: any) {
+          console.error(err);
+          setError(err.message || 'Gagal menutup tiket.');
+        }
+      }
+    });
+  };
+
   useEffect(() => {
     if (!loading && !isAuthenticated) {
       router.push('/login');
@@ -70,19 +268,21 @@ export default function UserDashboard() {
   async function loadDashboardData() {
     try {
       setFetching(true);
-      const [txsData, gamesData, methodsData, requestsData, publicSettingsData, announcementsData] = await Promise.all([
+      const [txsData, gamesData, methodsData, requestsData, publicSettingsData, announcementsData, ticketsData] = await Promise.all([
         api.getUserTransactions(),
         api.getGames(),
         api.getTopupMethods(),
         api.getTopupRequests(),
         api.getPublicSettings(),
-        api.getAnnouncements()
+        api.getAnnouncements(),
+        api.getUserTickets()
       ]);
       setTransactions(txsData);
       setGames(gamesData);
       setTopupMethods(methodsData);
       setTopupRequests(requestsData);
       setAnnouncements(announcementsData || []);
+      setTickets(ticketsData || []);
       if (publicSettingsData?.web_name) {
         setWebName(publicSettingsData.web_name);
       }
@@ -365,7 +565,7 @@ export default function UserDashboard() {
                         {/* Game Category Thumbnail */}
                         {game.thumbnail ? (
                           <img
-                            src={`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'}${game.thumbnail}`}
+                            src={getAssetUrl(game.thumbnail)}
                             alt={game.name}
                             className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-xs group-hover:border-primary/30 transition-colors shrink-0"
                           />
@@ -793,52 +993,675 @@ export default function UserDashboard() {
     );
   };
 
-  const renderProfileTab = () => (
-    <div className="bg-white rounded-2xl border border-border p-6 shadow-sm max-w-xl">
-      <h2 className="text-lg font-bold text-foreground font-heading mb-6">Informasi Akun</h2>
-      
-      <div className="space-y-6">
-        <div className="flex items-center space-x-4 pb-6 border-b border-slate-100">
-          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-2xl font-heading">
-            {user?.name.charAt(0).toUpperCase()}
-          </div>
-          <div>
-            <h3 className="font-extrabold text-foreground text-lg leading-tight">{user?.name}</h3>
-            <span className="text-xs text-foreground/45 font-bold uppercase tracking-wider">
-              {user?.role === 'admin' ? 'Administrator' : 'Pengguna Terdaftar'}
-            </span>
+  const renderDeveloperTab = () => {
+    const apiBaseUrl = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}` : 'http://localhost:8000';
+
+    return (
+      <div className="space-y-6 animate-in fade-in duration-300">
+        {/* Header Section */}
+        <div className="bg-gradient-to-r from-blue-700 via-indigo-600 to-purple-600 text-white p-5 rounded-2xl shadow-md relative overflow-hidden">
+          <div className="absolute right-0 bottom-0 w-36 h-36 bg-white/5 rounded-full blur-2xl -mr-10 -mb-10 pointer-events-none" />
+          <div className="relative z-10">
+            <h2 className="text-base md:text-lg font-black font-heading tracking-tight uppercase">Reseller API Developer Hub</h2>
+            <p className="text-[10px] sm:text-xs text-white/85 mt-1 font-medium">Integrasikan sistem penjualan Anda langsung dengan store kami menggunakan API RESTful berkinerja tinggi.</p>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-sm">
-          <div>
-            <span className="block text-xs font-bold text-foreground/45 uppercase tracking-wider mb-1">Nama Lengkap</span>
-            <span className="text-foreground/80 font-semibold text-base">{user?.name}</span>
+        <div className="grid grid-cols-1 gap-6">
+          {/* API Key Management Card */}
+          <div className="bg-white border border-border p-6 rounded-2xl shadow-sm space-y-4">
+            <div>
+              <h3 className="font-extrabold text-slate-800 text-sm font-heading mb-1 uppercase tracking-wider">Kredensial API Key Anda</h3>
+              <p className="text-[10px] text-slate-500 font-medium">Simpan API Key Anda dengan aman. Jangan pernah membagikan API Key Anda kepada siapa pun.</p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+              <div className="flex-grow relative rounded-xl border border-slate-200 shadow-sm focus-within:border-primary transition-all">
+                <input
+                  type={apiKeyVisible ? 'text' : 'password'}
+                  readOnly
+                  value={user?.api_token || ''}
+                  placeholder={user?.api_token ? '' : 'Belum memiliki API Key. Klik generate.'}
+                  className="block w-full px-4 py-3 text-xs font-mono rounded-xl focus:outline-none text-slate-700 font-bold bg-slate-50 select-all pr-10"
+                />
+                {user?.api_token && (
+                  <button
+                    type="button"
+                    onClick={() => setApiKeyVisible(!apiKeyVisible)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer bg-transparent border-0"
+                  >
+                    {apiKeyVisible ? (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {user?.api_token && (
+                <button
+                  type="button"
+                  onClick={() => handleCopy(user.api_token || '', 'API Key')}
+                  className="px-4 py-3 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer active:scale-95 transition-all bg-white"
+                >
+                  Salin API Key
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleGenerateApiKey}
+                disabled={generatingKey}
+                className="px-5 py-3 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold cursor-pointer disabled:opacity-50 active:scale-95 transition-all shadow-md shadow-primary/10 border-0 shrink-0"
+              >
+                {generatingKey ? 'Menghubungkan...' : user?.api_token ? 'Regenerasi API Key' : 'Generate API Key'}
+              </button>
+            </div>
           </div>
-          <div>
-            <span className="block text-xs font-bold text-foreground/45 uppercase tracking-wider mb-1">Alamat Email</span>
-            <span className="text-foreground/80 font-semibold text-base">{user?.email}</span>
+
+          {/* Interactive API Documentation */}
+          <div className="bg-white border border-border p-6 rounded-2xl shadow-sm space-y-6">
+            <div>
+              <h3 className="font-extrabold text-slate-800 text-sm font-heading mb-1 uppercase tracking-wider">Integrasi & Dokumentasi API</h3>
+              <p className="text-[10px] text-slate-500 font-medium">Dokumentasi API lengkap untuk reseller memesan voucher game secara otomatis.</p>
+            </div>
+
+            <div className="space-y-6 text-xs text-slate-700 leading-relaxed font-sans">
+              
+              {/* Authentication */}
+              <div className="space-y-2 pb-5 border-b border-slate-100">
+                <h4 className="font-black text-slate-800 uppercase tracking-wide flex items-center gap-2 text-xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                  1. Keamanan & Autentikasi
+                </h4>
+                <p>
+                  Setiap request API ke sistem kami wajib diautentikasi menggunakan <strong>API Key</strong> Anda. 
+                  Anda dapat menyertakan API Key tersebut dengan salah satu cara berikut:
+                </p>
+                <ul className="list-disc pl-5 mt-2 space-y-1">
+                  <li>Mengirimkan header HTTP <code>X-API-KEY</code> (Sangat direkomendasikan)</li>
+                  <li>Mengirimkan parameter query string <code>api_key</code></li>
+                </ul>
+              </div>
+
+              {/* Check Balance */}
+              <div className="space-y-3 pb-5 border-b border-slate-100">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="bg-green-600 text-white font-black px-2 py-0.5 rounded text-[10px] leading-none uppercase">GET</span>
+                  <span className="font-mono font-bold text-slate-800 text-[11px]">/api/v1/profile</span>
+                </div>
+                <p className="text-slate-600">Mengecek profil dan sisa saldo akun reseller Anda.</p>
+                <div className="bg-slate-900 rounded-xl p-4 text-white overflow-x-auto font-mono text-[10px] space-y-3">
+                  <div>
+                    <span className="text-amber-400 font-bold">// HTTP Request (cURL)</span>
+                    <pre className="mt-1.5 text-slate-300">curl -X GET &quot;{apiBaseUrl}/api/v1/profile&quot; \<br />  -H &quot;X-API-KEY: YOUR_API_KEY_HERE&quot;</pre>
+                  </div>
+                  <div className="border-t border-slate-800 pt-2.5">
+                    <span className="text-emerald-400 font-bold">// Response Sukses (200 OK)</span>
+                    <pre className="mt-1.5 text-slate-300">{JSON.stringify({
+  "success": true,
+  "data": {
+    "name": "Member Reseller",
+    "email": "reseller@example.com",
+    "balance": 250000.00
+  }
+}, null, 2)}</pre>
+                  </div>
+                </div>
+              </div>
+
+              {/* Get Products */}
+              <div className="space-y-3 pb-5 border-b border-slate-100">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="bg-green-600 text-white font-black px-2 py-0.5 rounded text-[10px] leading-none uppercase">GET</span>
+                  <span className="font-mono font-bold text-slate-800 text-[11px]">/api/v1/products</span>
+                </div>
+                <p className="text-slate-600">Mengambil daftar produk game aktif, lengkap dengan SKU Code, harga reseller, dan status flash sale.</p>
+                <div className="bg-slate-900 rounded-xl p-4 text-white overflow-x-auto font-mono text-[10px] space-y-3">
+                  <div>
+                    <span className="text-amber-400 font-bold">// HTTP Request (cURL)</span>
+                    <pre className="mt-1.5 text-slate-300">curl -X GET &quot;{apiBaseUrl}/api/v1/products&quot; \<br />  -H &quot;X-API-KEY: YOUR_API_KEY_HERE&quot;</pre>
+                  </div>
+                  <div className="border-t border-slate-800 pt-2.5">
+                    <span className="text-emerald-400 font-bold">// Response Sukses (200 OK)</span>
+                    <pre className="mt-1.5 text-slate-300">{JSON.stringify({
+  "success": true,
+  "data": [
+    {
+      "sku": "ML-5",
+      "name": "5 Diamonds",
+      "category": "Mobile Legends",
+      "price": 1450,
+      "is_flash_sale": false
+    },
+    {
+      "sku": "FF-140",
+      "name": "140 Diamonds",
+      "category": "Free Fire",
+      "price": 19000,
+      "is_flash_sale": true
+    }
+  ]
+}, null, 2)}</pre>
+                  </div>
+                </div>
+              </div>
+
+              {/* Create Transaction */}
+              <div className="space-y-3 pb-5 border-b border-slate-100">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="bg-blue-600 text-white font-black px-2 py-0.5 rounded text-[10px] leading-none uppercase">POST</span>
+                  <span className="font-mono font-bold text-slate-800 text-[11px]">/api/v1/order</span>
+                </div>
+                <p className="text-slate-600">Memesan top-up dengan memotong saldo reseller Anda. Pengiriman produk akan diproses secara instan via Digiflazz.</p>
+                
+                {/* Parameters Table */}
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-left text-[11px] border-collapse bg-slate-50/50">
+                    <thead>
+                      <tr className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700">
+                        <th className="p-3">Parameter</th>
+                        <th className="p-3">Tipe</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3">Keterangan</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-150 text-slate-600">
+                      <tr>
+                        <td className="p-3 font-mono font-bold">buyer_sku_code</td>
+                        <td className="p-3 font-mono">string</td>
+                        <td className="p-3 font-semibold text-error">Wajib</td>
+                        <td className="p-3">Kode SKU Produk (didapat dari API /products).</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-mono font-bold">target_id</td>
+                        <td className="p-3 font-mono">string</td>
+                        <td className="p-3 font-semibold text-error">Wajib</td>
+                        <td className="p-3">Nomor Tujuan / ID Game Pelanggan.</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-mono font-bold">target_zone</td>
+                        <td className="p-3 font-mono">string</td>
+                        <td className="p-3 font-semibold text-slate-400">Opsional</td>
+                        <td className="p-3">Zone ID / Server ID (Wajib untuk game tertentu seperti Mobile Legends).</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-mono font-bold">ref_id</td>
+                        <td className="p-3 font-mono">string</td>
+                        <td className="p-3 font-semibold text-error">Wajib</td>
+                        <td className="p-3">Kode invoice unik dari sistem Anda (maksimal 100 karakter). Digunakan untuk mencegah duplikasi order.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="bg-slate-900 rounded-xl p-4 text-white overflow-x-auto font-mono text-[10px] space-y-3">
+                  <div>
+                    <span className="text-amber-400 font-bold">// HTTP Request (cURL)</span>
+                    <pre className="mt-1.5 text-slate-300">curl -X POST &quot;{apiBaseUrl}/api/v1/order&quot; \<br />  -H &quot;X-API-KEY: YOUR_API_KEY_HERE&quot; \<br />  -H &quot;Content-Type: application/json&quot; \<br />  -d &apos;{JSON.stringify({
+  "buyer_sku_code": "ML-5",
+  "target_id": "12345678",
+  "target_zone": "1234",
+  "ref_id": "INV-20260621-009"
+}, null, 2)}&apos;</pre>
+                  </div>
+                  <div className="border-t border-slate-800 pt-2.5">
+                    <span className="text-emerald-400 font-bold">// Response Sukses (200 OK)</span>
+                    <pre className="mt-1.5 text-slate-300">{JSON.stringify({
+  "success": true,
+  "message": "Transaksi berhasil dibuat.",
+  "data": {
+    "invoice_id": "INV-20260621-009",
+    "ref_id": "INV-20260621-009",
+    "sku": "ML-5",
+    "amount": 1450,
+    "payment_status": "paid",
+    "delivery_status": "completed",
+    "notes": "Top-up berhasil. SN: 981726354891823",
+    "sn": "981726354891823",
+    "created_at": "2026-06-21T10:32:00.000000Z"
+  }
+}, null, 2)}</pre>
+                  </div>
+                </div>
+              </div>
+
+              {/* Check Status */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="bg-green-600 text-white font-black px-2 py-0.5 rounded text-[10px] leading-none uppercase">GET</span>
+                  <span className="font-mono font-bold text-slate-800 text-[11px]">/api/v1/order/&#123;ref_id&#125;</span>
+                </div>
+                <p className="text-slate-600">Mengecek status pembayaran dan status pengiriman voucher game berdasarkan <code>ref_id</code> (Invoice ID) transaksi.</p>
+                <div className="bg-slate-900 rounded-xl p-4 text-white overflow-x-auto font-mono text-[10px] space-y-3">
+                  <div>
+                    <span className="text-amber-400 font-bold">// HTTP Request (cURL)</span>
+                    <pre className="mt-1.5 text-slate-300">curl -X GET &quot;{apiBaseUrl}/api/v1/order/INV-20260621-009&quot; \<br />  -H &quot;X-API-KEY: YOUR_API_KEY_HERE&quot;</pre>
+                  </div>
+                  <div className="border-t border-slate-800 pt-2.5">
+                    <span className="text-emerald-400 font-bold">// Response Sukses (200 OK)</span>
+                    <pre className="mt-1.5 text-slate-300">{JSON.stringify({
+  "success": true,
+  "data": {
+    "invoice_id": "INV-20260621-009",
+    "amount": 1450,
+    "payment_status": "paid",
+    "delivery_status": "completed",
+    "notes": "Top-up berhasil. SN: 981726354891823",
+    "sn": "981726354891823",
+    "created_at": "2026-06-21T10:32:00.000000Z"
+  }
+}, null, 2)}</pre>
+                  </div>
+                </div>
+              </div>
+
+            </div>
           </div>
-          <div>
-            <span className="block text-xs font-bold text-foreground/45 uppercase tracking-wider mb-1">Tipe Akun</span>
-            <span className="inline-block mt-1 text-xs uppercase px-2.5 py-0.5 rounded bg-slate-100 text-slate-600 font-bold border border-slate-200">
-              {user?.role === 'admin' ? 'Admin' : 'Pengguna Biasa'}
-            </span>
+        </div>
+      </div>
+    );
+  };
+
+  const renderProfileTab = () => (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl">
+      {/* Profil Info Panel */}
+      <div className="md:col-span-1 bg-white border border-border p-6 rounded-2xl shadow-sm flex flex-col items-center text-center">
+        <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-3xl font-heading mb-4">
+          {user?.name.charAt(0).toUpperCase()}
+        </div>
+        <h3 className="font-extrabold text-foreground text-lg leading-tight">{user?.name}</h3>
+        <span className="text-xs text-foreground/45 font-bold uppercase tracking-wider mt-1 block">
+          {user?.role === 'admin' ? 'Administrator' : 'Pengguna Terdaftar'}
+        </span>
+        
+        <div className="border-t border-slate-100 dark:border-slate-800 my-4 pt-4 w-full text-xs space-y-3 text-left">
+          <div className="flex justify-between">
+            <span className="text-slate-400">Tipe Akun:</span>
+            <span className="font-bold text-slate-700 dark:text-slate-300 capitalize">{user?.role === 'admin' ? 'Admin' : 'Regular'}</span>
           </div>
-          <div>
-            <span className="block text-xs font-bold text-foreground/45 uppercase tracking-wider mb-1">Terdaftar Sejak</span>
-            <span className="text-foreground/80 font-semibold text-base">
+          <div className="flex justify-between">
+            <span className="text-slate-400">Bergabung:</span>
+            <span className="font-bold text-slate-700 dark:text-slate-300">
               {user?.created_at ? new Date(user.created_at).toLocaleDateString('id-ID', {
                 year: 'numeric',
-                month: 'long',
+                month: 'short',
                 day: 'numeric'
               }) : '-'}
             </span>
           </div>
         </div>
       </div>
+
+      {/* Form Edit Panel */}
+      <div className="md:col-span-2 bg-white border border-border p-6 rounded-2xl shadow-sm">
+        <h2 className="text-lg font-bold text-foreground font-heading mb-6 border-b border-slate-100 dark:border-slate-800 pb-3">
+          Edit Informasi Profil
+        </h2>
+        
+        {profileError && (
+          <div className="p-3 mb-4 bg-error/10 border border-error/20 text-error rounded-xl text-xs font-semibold">
+            {profileError}
+          </div>
+        )}
+
+        <form onSubmit={handleSaveProfile} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-foreground/50 uppercase tracking-wider mb-1.5">
+              Nama Lengkap
+            </label>
+            <input
+              type="text"
+              value={profileName}
+              onChange={(e) => setProfileName(e.target.value)}
+              disabled={savingProfile}
+              required
+              className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-foreground"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-foreground/50 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+              <span>Alamat Email</span>
+              <span className="text-[10px] text-amber-600 bg-amber-50 dark:bg-amber-950/20 dark:text-amber-400 px-1.5 py-0.5 rounded-md font-bold uppercase tracking-normal">
+                Tidak Dapat Diubah
+              </span>
+            </label>
+            <input
+              type="email"
+              value={user?.email || ''}
+              disabled
+              className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-sm text-foreground/45 cursor-not-allowed"
+            />
+            <p className="text-[10px] text-foreground/40 mt-1 italic leading-normal">
+              *Email dikunci demi keamanan akun dan validasi transaksi.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-foreground/50 uppercase tracking-wider mb-1.5">
+              Password Baru (Opsional)
+            </label>
+            <input
+              type="password"
+              placeholder="Kosongkan jika tidak ingin mengubah password"
+              value={profilePassword}
+              onChange={(e) => setProfilePassword(e.target.value)}
+              disabled={savingProfile}
+              className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-foreground"
+            />
+          </div>
+
+          <div className="pt-2">
+            <button
+              type="submit"
+              disabled={savingProfile}
+              className="glow-button w-full sm:w-auto px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {savingProfile ? 'Menyimpan...' : 'Simpan Perubahan'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
+
+  const renderTicketsTab = () => {
+    const getStatusBadge = (status: Ticket['status']) => {
+      switch (status) {
+        case 'open':
+          return (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-warning/10 text-warning border border-warning/20 uppercase">
+              Menunggu Admin
+            </span>
+          );
+        case 'replied':
+          return (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-success/10 text-success border border-success/20 uppercase">
+              Dibalas
+            </span>
+          );
+        case 'closed':
+          return (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-400 border border-slate-200 uppercase">
+              Ditutup
+            </span>
+          );
+        default:
+          return null;
+      }
+    };
+
+    const getCategoryLabel = (category: Ticket['category']) => {
+      switch (category) {
+        case 'transaksi':
+          return 'Masalah Transaksi';
+        case 'topup':
+          return 'Top Up Saldo';
+        case 'akun':
+          return 'Masalah Akun';
+        default:
+          return 'Lainnya';
+      }
+    };
+
+    if (selectedTicketId && activeTicket) {
+      return (
+        <div className="bg-white rounded-2xl border border-border overflow-hidden shadow-sm animate-in fade-in duration-300 flex flex-col min-h-[60vh]">
+          {/* Ticket Detail Header */}
+          <div className="p-5 border-b border-border flex flex-wrap items-center justify-between gap-4 shrink-0 bg-slate-50">
+            <div className="space-y-1">
+              <button
+                onClick={() => {
+                  setSelectedTicketId(null);
+                  setActiveTicket(null);
+                }}
+                className="text-xs font-bold text-primary hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer mb-2"
+              >
+                &larr; Kembali ke Daftar Tiket
+              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base font-bold text-slate-800 font-heading">
+                  #{activeTicket.id} - {activeTicket.title}
+                </h2>
+                {getStatusBadge(activeTicket.status)}
+              </div>
+              <p className="text-[10px] text-slate-400 font-medium">
+                Kategori: <span className="font-bold text-slate-600">{getCategoryLabel(activeTicket.category)}</span> • Dibuat pada {new Date(activeTicket.created_at).toLocaleString('id-ID')}
+              </p>
+            </div>
+            {activeTicket.status !== 'closed' && (
+              <button
+                onClick={() => handleCloseTicket(activeTicket.id)}
+                className="bg-error/10 hover:bg-error/20 text-error px-3.5 py-2 rounded-xl text-xs font-bold transition-all border-0 cursor-pointer active:scale-95 flex items-center gap-1.5"
+              >
+                Tutup Tiket
+              </button>
+            )}
+          </div>
+
+          {/* Ticket Messages Thread */}
+          <div className="flex-grow p-5 overflow-y-auto space-y-4 max-h-[450px] bg-slate-50/30">
+            {loadingTicketDetail ? (
+              <div className="flex justify-center items-center py-10">
+                <svg className="animate-spin h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              </div>
+            ) : (
+              activeTicket.messages?.map((msg) => {
+                const isAdminMsg = msg.sender?.role === 'admin';
+                return (
+                  <div
+                    key={msg.id}
+                    className={`flex ${isAdminMsg ? 'justify-start' : 'justify-end'}`}
+                  >
+                    <div className="max-w-[80%] flex flex-col space-y-1">
+                      <div
+                        className={`rounded-2xl px-4 py-3 text-xs leading-relaxed font-sans shadow-xs ${
+                          isAdminMsg
+                            ? 'bg-white text-slate-800 border border-slate-100 rounded-tl-none'
+                            : 'bg-primary text-white rounded-tr-none'
+                        }`}
+                      >
+                        {msg.message}
+                      </div>
+                      <span
+                        className={`text-[9px] text-slate-400 px-1 font-mono ${
+                          isAdminMsg ? 'text-left' : 'text-right'
+                        }`}
+                      >
+                        {isAdminMsg ? 'Admin' : 'Anda'} • {new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Ticket Messages Input */}
+          <div className="p-4 border-t border-border bg-white shrink-0">
+            {activeTicket.status === 'closed' ? (
+              <div className="p-3.5 bg-slate-50 border border-slate-100 rounded-xl text-center text-xs font-semibold text-slate-500">
+                Tiket ini telah ditutup. Kirim pesan di bawah untuk membuka kembali tiket bantuan ini.
+              </div>
+            ) : null}
+
+            <form onSubmit={handleReplyTicketSubmit} className="mt-3 flex items-stretch gap-2">
+              <input
+                type="text"
+                placeholder="Tulis pesan balasan Anda..."
+                value={ticketMessage}
+                onChange={(e) => setTicketMessage(e.target.value)}
+                disabled={ticketReplySubmitting}
+                className="flex-grow px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 border border-slate-200 focus:border-primary text-slate-800 font-medium placeholder-slate-400"
+                required
+              />
+              <button
+                type="submit"
+                disabled={ticketReplySubmitting || !ticketMessage.trim()}
+                className="bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-bold text-xs px-5 rounded-xl transition-all border-0 cursor-pointer flex items-center justify-center shrink-0"
+              >
+                {ticketReplySubmitting ? 'Mengirim...' : 'Kirim'}
+              </button>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    if (showNewTicketForm) {
+      return (
+        <div className="bg-white rounded-2xl border border-border p-6 shadow-sm animate-in fade-in duration-300">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h2 className="text-base font-bold text-slate-800 font-heading">Buat Tiket Bantuan Baru</h2>
+              <p className="text-[11px] text-slate-400">Ajukan pertanyaan atau laporkan masalah Anda</p>
+            </div>
+            <button
+              onClick={() => setShowNewTicketForm(false)}
+              className="text-xs font-bold text-slate-500 hover:text-slate-700 bg-transparent border-0 cursor-pointer"
+            >
+              Batal
+            </button>
+          </div>
+
+          <form onSubmit={handleCreateTicketSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-foreground/60 uppercase tracking-wider mb-1.5">
+                Kategori Masalah
+              </label>
+              <select
+                value={ticketCategory}
+                onChange={(e) => setTicketCategory(e.target.value as any)}
+                className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-slate-700 font-bold"
+              >
+                <option value="transaksi">Masalah Transaksi</option>
+                <option value="topup">Top Up Saldo</option>
+                <option value="akun">Masalah Akun</option>
+                <option value="lainnya">Lainnya</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-foreground/60 uppercase tracking-wider mb-1.5">
+                Subjek / Judul Tiket
+              </label>
+              <input
+                type="text"
+                placeholder="Contoh: Saldo belum masuk / Invoice YOI-XXXX"
+                value={ticketTitle}
+                onChange={(e) => setTicketTitle(e.target.value)}
+                required
+                className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-slate-800 font-bold placeholder-slate-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-foreground/60 uppercase tracking-wider mb-1.5">
+                Isi Pesan Detail
+              </label>
+              <textarea
+                rows={4}
+                placeholder="Jelaskan kendala Anda secara rinci agar admin dapat membantu dengan cepat..."
+                value={ticketInitialMsg}
+                onChange={(e) => setTicketInitialMsg(e.target.value)}
+                required
+                className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-slate-800 font-medium placeholder-slate-400 resize-none font-sans"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={ticketSubmitting}
+              className="w-full bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-bold text-xs py-3.5 px-4 rounded-xl transition-all shadow-md shadow-primary/10 border-0 cursor-pointer"
+            >
+              {ticketSubmitting ? 'Membuat Tiket...' : 'Kirim Tiket Bantuan'}
+            </button>
+          </form>
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-white rounded-2xl border border-border overflow-hidden shadow-sm animate-in fade-in duration-300">
+        <div className="p-5 border-b border-border flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-base font-bold text-foreground font-heading">Tiket Bantuan Saya</h2>
+            <p className="text-[11px] text-foreground/45 mt-0.5">Ajukan bantuan atau keluhan langsung ke Customer Support</p>
+          </div>
+          <button
+            onClick={() => setShowNewTicketForm(true)}
+            className="bg-primary hover:bg-primary-hover text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md shadow-primary/10 border-0 cursor-pointer active:scale-95"
+          >
+            Buat Tiket Baru
+          </button>
+        </div>
+
+        {tickets.length === 0 ? (
+          <div className="text-center py-16 px-4">
+            <svg className="w-12 h-12 text-slate-200 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+            </svg>
+            <h3 className="font-bold text-slate-700 text-xs font-heading">Belum Ada Tiket Bantuan</h3>
+            <p className="text-[10px] text-slate-400 mt-1">Anda tidak memiliki tiket aduan aktif saat ini.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-border text-slate-500 font-bold uppercase tracking-wider">
+                  <th className="px-5 py-3">Tiket ID</th>
+                  <th className="px-5 py-3">Subjek / Judul</th>
+                  <th className="px-5 py-3">Kategori</th>
+                  <th className="px-5 py-3">Tanggal Update</th>
+                  <th className="px-5 py-3 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {tickets.map((t) => (
+                  <tr
+                    key={t.id}
+                    onClick={() => handleSelectTicket(t.id)}
+                    className="hover:bg-slate-50/50 transition-colors cursor-pointer"
+                  >
+                    <td className="px-5 py-4 font-mono font-bold text-primary">
+                      #{t.id}
+                    </td>
+                    <td className="px-5 py-4 font-bold text-slate-700 max-w-xs truncate">
+                      {t.title}
+                    </td>
+                    <td className="px-5 py-4 font-semibold text-slate-500">
+                      {getCategoryLabel(t.category)}
+                    </td>
+                    <td className="px-5 py-4 text-slate-400 font-medium">
+                      {new Date(t.updated_at).toLocaleDateString('id-ID', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </td>
+                    <td className="px-5 py-4 text-center whitespace-nowrap">
+                      {getStatusBadge(t.status)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="container mx-auto px-4 py-6 md:py-10 max-w-6xl">
@@ -865,58 +1688,71 @@ export default function UserDashboard() {
         {/* Navigation Sidebar */}
         <aside className="w-full md:w-64 shrink-0 flex flex-col space-y-4">
           
-          {/* Mobile Navigation Tabs */}
-          <div className="md:hidden bg-slate-100 p-1 rounded-xl flex overflow-x-auto space-x-1 scrollbar-hide shadow-inner w-full shrink-0">
+          {/* Mobile Navigation Dropdown (Burger Style) */}
+          <div className="md:hidden w-full relative">
             <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer border-0 ${
-                activeTab === 'dashboard'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
+              type="button"
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="w-full flex items-center justify-between bg-white border border-border px-4 py-3 rounded-xl shadow-sm text-xs font-bold text-foreground hover:bg-slate-50 transition-all cursor-pointer"
             >
-              Dashboard
+              <div className="flex items-center space-x-2.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse" />
+                <span className="text-slate-400">Navigasi:</span>
+                <span className="text-primary font-black uppercase">
+                  {activeTab === 'dashboard' && 'Dashboard'}
+                  {activeTab === 'topup' && 'Isi Saldo'}
+                  {activeTab === 'transactions' && 'Riwayat Transaksi'}
+                  {activeTab === 'topup_history' && 'Riwayat Saldo'}
+                  {activeTab === 'profile' && 'Profil'}
+                  {activeTab === 'developer' && 'API Developer'}
+                  {activeTab === 'tickets' && 'Tiket Bantuan'}
+                </span>
+              </div>
+              <div className="flex items-center space-x-1.5 text-slate-500">
+                <svg className={`w-4 h-4 transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
             </button>
-            <button
-              onClick={() => setActiveTab('topup')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer border-0 ${
-                activeTab === 'topup'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Isi Saldo
-            </button>
-            <button
-              onClick={() => setActiveTab('transactions')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer border-0 ${
-                activeTab === 'transactions'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Riwayat Tx
-            </button>
-            <button
-              onClick={() => setActiveTab('topup_history')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer border-0 ${
-                activeTab === 'topup_history'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Riwayat Saldo
-            </button>
-            <button
-              onClick={() => setActiveTab('profile')}
-              className={`flex-grow text-center py-2.5 px-4 text-xs font-bold rounded-lg uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer border-0 ${
-                activeTab === 'profile'
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Profil
-            </button>
+
+            {menuOpen && (
+              <div className="absolute left-0 right-0 mt-1.5 bg-white border border-border rounded-xl shadow-xl z-30 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="p-1 space-y-1">
+                  {[
+                    { key: 'dashboard', name: 'Dashboard' },
+                    { key: 'topup', name: 'Isi Saldo' },
+                    { key: 'transactions', name: 'Riwayat Transaksi' },
+                    { key: 'topup_history', name: 'Riwayat Saldo' },
+                    { key: 'profile', name: 'Profil' },
+                    { key: 'developer', name: 'API Developer' },
+                    { key: 'tickets', name: 'Tiket Bantuan' }
+                  ].map((tab) => {
+                    const isSelected = activeTab === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        onClick={() => {
+                          setActiveTab(tab.key as any);
+                          setMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-4 py-3 rounded-lg text-xs font-bold uppercase transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-primary/5 text-primary font-black'
+                            : 'text-slate-500 hover:text-foreground hover:bg-slate-50'
+                        }`}
+                      >
+                        <span>{tab.name}</span>
+                        {tab.key === 'tickets' && repliedTicketsCount > 0 && (
+                          <span className="w-4 h-4 bg-error text-white font-extrabold rounded-full flex items-center justify-center text-[9px] scale-95 shrink-0 animate-pulse">
+                            {repliedTicketsCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Desktop Navigation Sidebar */}
@@ -1012,6 +1848,41 @@ export default function UserDashboard() {
               </svg>
               <span>Profil</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('developer')}
+              className={`w-full flex items-center space-x-3 px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 border-t-0 border-r-0 border-b-0 text-left bg-transparent ${
+                activeTab === 'developer'
+                  ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+              }`}
+            >
+              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <span>API Developer</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('tickets')}
+              className={`w-full flex items-center justify-between px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 border-t-0 border-r-0 border-b-0 text-left bg-transparent ${
+                activeTab === 'tickets'
+                  ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+                </svg>
+                <span>Tiket Bantuan</span>
+              </div>
+              {repliedTicketsCount > 0 && (
+                <span className="w-4 h-4 bg-error text-white font-extrabold rounded-full flex items-center justify-center text-[9px] scale-95 shrink-0 animate-pulse">
+                  {repliedTicketsCount}
+                </span>
+              )}
+            </button>
           </div>
         </aside>
 
@@ -1022,6 +1893,8 @@ export default function UserDashboard() {
           {activeTab === 'topup' && renderTopupTab()}
           {activeTab === 'topup_history' && renderTopupHistoryTab()}
           {activeTab === 'profile' && renderProfileTab()}
+          {activeTab === 'developer' && renderDeveloperTab()}
+          {activeTab === 'tickets' && renderTicketsTab()}
         </main>
       </div>
 
@@ -1236,6 +2109,12 @@ export default function UserDashboard() {
                         {tx.target_id} {tx.target_zone ? `(${tx.target_zone})` : ''}
                       </span>
                     </div>
+                    {tx.nickname && (
+                      <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50 text-emerald-600 dark:text-emerald-400">
+                        <span className="text-slate-400">Nickname Akun</span>
+                        <span className="font-extrabold text-xs text-right">{tx.nickname}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50">
                       <span className="text-slate-400">Metode Bayar</span>
                       <span className="font-bold text-slate-800 text-xs uppercase text-right">{tx.payment_method}</span>
@@ -1332,6 +2211,42 @@ export default function UserDashboard() {
           </div>
         );
       })()}
+
+      {/* Custom Confirmation Modal (No Emotes) */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-xs rounded-2xl shadow-2xl border border-border p-5 animate-in zoom-in-95 duration-200 text-center flex flex-col items-center">
+            {/* Visual Icon - Key SVG */}
+            <div className="w-12 h-12 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m-9 5a3 3 0 11-6 0 3 3 0 016 0zM19 9a3 3 0 11-6 0 3 3 0 016 0zM4 11h16m-2 4h.01M4 15h.01" />
+              </svg>
+            </div>
+            <h4 className="text-xs font-extrabold text-slate-800 font-heading mt-3 uppercase tracking-wider">
+              {confirmModal.title}
+            </h4>
+            <p className="text-[10px] text-slate-500 mt-2 leading-relaxed font-sans">
+              {confirmModal.message}
+            </p>
+            <div className="flex items-center justify-center space-x-2.5 mt-5 w-full">
+              <button
+                type="button"
+                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2.5 rounded-lg border border-slate-200 text-[10px] font-bold text-slate-500 hover:bg-slate-50 transition-all uppercase tracking-wider cursor-pointer flex-1 bg-transparent"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={confirmModal.onConfirm}
+                className="px-4 py-2.5 rounded-lg bg-primary text-white text-[10px] font-bold hover:bg-primary-hover active:bg-primary-dark transition-all uppercase tracking-wider cursor-pointer flex-1 border-0"
+              >
+                Setuju
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

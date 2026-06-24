@@ -3,10 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { api, Transaction, AdminStats, User, TopupMethod, TopupRequest, Voucher, Announcement, Game, getAssetUrl, Ticket, TicketMessage } from '@/services/api';
+import { api, Transaction, AdminStats, User, TopupMethod, TopupRequest, Voucher, Announcement, Game, getAssetUrl, Ticket, TicketMessage, BalanceHistory } from '@/services/api';
 import Link from 'next/link';
 
-type TabType = 'summary' | 'users' | 'products' | 'settings' | 'topup_requests' | 'topup_methods' | 'payment_methods' | 'games' | 'web_settings' | 'vouchers' | 'announcements' | 'flash_sales' | 'digiflazz_topup' | 'tickets';
+type TabType = 'summary' | 'users' | 'products' | 'settings' | 'topup_requests' | 'topup_methods' | 'games' | 'web_settings' | 'vouchers' | 'announcements' | 'flash_sales' | 'digiflazz_topup' | 'tickets' | 'midtrans';
 
 const CATEGORIES = [
   { id: 'games', name: 'Game Voucher' },
@@ -68,17 +68,25 @@ export default function AdminDashboard() {
   const [userFormErrors, setUserFormErrors] = useState<any>({});
   const [userModalSubmitting, setUserModalSubmitting] = useState(false);
 
+  // User Balance History Modal state
+  const [adminUserBalanceHistoryModalOpen, setAdminUserBalanceHistoryModalOpen] = useState(false);
+  const [selectedBalanceHistories, setSelectedBalanceHistories] = useState<BalanceHistory[]>([]);
+  const [balanceHistoryUser, setBalanceHistoryUser] = useState<User | null>(null);
+  const [loadingBalanceHistory, setLoadingBalanceHistory] = useState(false);
+
   // Settings state
   const [settingsForm, setSettingsForm] = useState({
     digiflazz_username: '',
     digiflazz_api_key: '',
     digiflazz_mode: 'development',
     global_markup_type: 'percent',
-    global_markup_value: 10
+    global_markup_value: 10,
+    midtrans_server_key: '',
+    midtrans_client_key: '',
+    midtrans_mode: 'sandbox',
+    midtrans_is_active: false
   });
 
-  // Payment methods state
-  const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
   const [brandLogo, setBrandLogo] = useState<string | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
   const [favicon, setFavicon] = useState<string | null>(null);
@@ -200,16 +208,6 @@ export default function AdminDashboard() {
     });
   };
 
-  // Payment Method Modal CRUD states
-  const [pmModalOpen, setPmModalOpen] = useState(false);
-  const [editingPm, setEditingPm] = useState<any | null>(null);
-  const [pmForm, setPmForm] = useState({
-    id: '',
-    name: '',
-    type: 'E-Wallet',
-    fee: 0,
-    is_active: true
-  });
 
   // Product Edit Modal / State
   const [editingProduct, setEditingProduct] = useState<any | null>(null);
@@ -287,13 +285,12 @@ export default function AdminDashboard() {
     setFetching(true);
     setError('');
     try {
-      const [statsData, txsData, usersData, productsData, settingsData, paymentMethodsData, topupRequestsData, topupMethodsData, publicSettingsData, gamesData, vouchersData, announcementsData, depositsData, ticketsData] = await Promise.all([
+      const [statsData, txsData, usersData, productsData, settingsData, topupRequestsData, topupMethodsData, publicSettingsData, gamesData, vouchersData, announcementsData, depositsData, ticketsData] = await Promise.all([
         api.getAdminStats(),
         api.getAdminTransactions(),
         api.getUsers(),
         api.getAdminProducts(),
         api.getAdminSettings(),
-        api.getAdminPaymentMethods(),
         api.getAdminTopupRequests(),
         api.getAdminTopupMethods(),
         api.getPublicSettings(),
@@ -314,9 +311,12 @@ export default function AdminDashboard() {
         digiflazz_api_key: settingsData.digiflazz_api_key || '',
         digiflazz_mode: settingsData.digiflazz_mode || 'development',
         global_markup_type: settingsData.global_markup_type || 'percent',
-        global_markup_value: parseFloat(settingsData.global_markup_value) || 0
+        global_markup_value: parseFloat(settingsData.global_markup_value) || 0,
+        midtrans_server_key: settingsData.midtrans_server_key || '',
+        midtrans_client_key: settingsData.midtrans_client_key || '',
+        midtrans_mode: settingsData.midtrans_mode || 'sandbox',
+        midtrans_is_active: settingsData.midtrans_is_active ?? false
       });
-      setPaymentMethods(paymentMethodsData || []);
       setBrandLogo(publicSettingsData?.brand_logo || null);
       setFavicon(publicSettingsData?.favicon || null);
       setWebNameForm(publicSettingsData?.web_name || 'YOI Store');
@@ -458,6 +458,25 @@ export default function AdminDashboard() {
     }
   };
 
+  // Midtrans Settings Save
+  const handleSaveMidtransSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSettingsSubmitting(true);
+    try {
+      const res = await api.updateAdminSettings(settingsForm);
+      if (res.success) {
+        setSuccessMsg('Konfigurasi Midtrans berhasil disimpan.');
+      } else {
+        setError(res.message || 'Gagal menyimpan konfigurasi.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Gagal menyimpan konfigurasi.');
+    } finally {
+      setSettingsSubmitting(false);
+    }
+  };
+
   // Web Settings Save
   const handleSaveWebSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -541,171 +560,6 @@ export default function AdminDashboard() {
     }
   };
 
-  const toggleMethodActive = (index: number) => {
-    const updated = [...paymentMethods];
-    updated[index].is_active = !updated[index].is_active;
-    setPaymentMethods(updated);
-  };
-
-  const updateMethodFee = (index: number, feeVal: number) => {
-    const updated = [...paymentMethods];
-    updated[index].fee = feeVal;
-    setPaymentMethods(updated);
-  };
-
-  const handleOpenPmModal = (pm: any | null = null) => {
-    setEditingPm(pm);
-    if (pm) {
-      setPmForm({
-        id: pm.id,
-        name: pm.name,
-        type: pm.type,
-        fee: pm.fee,
-        is_active: pm.is_active
-      });
-    } else {
-      setPmForm({
-        id: '',
-        name: '',
-        type: 'E-Wallet',
-        fee: 0,
-        is_active: true
-      });
-    }
-    setPmModalOpen(true);
-  };
-
-  const handleSavePm = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!pmForm.id.trim() || !pmForm.name.trim()) {
-      showAlert("Validasi Gagal", "Harap isi Kode ID dan Nama Metode.", "warning");
-      return;
-    }
-
-    const updatedList = [...paymentMethods];
-    const formattedId = pmForm.id.toUpperCase().replace(/\s+/g, '_');
-    
-    // Auto color assign
-    let pmColor = '';
-    if (pmForm.type === 'E-Wallet') {
-      if (formattedId.includes('DANA')) pmColor = 'text-blue-500 bg-blue-50 border-blue-200';
-      else if (formattedId.includes('OVO')) pmColor = 'text-purple-600 bg-purple-50 border-purple-200';
-      else if (formattedId.includes('GOPAY') || formattedId.includes('GO_PAY')) pmColor = 'text-emerald-600 bg-emerald-50 border-emerald-200';
-      else if (formattedId.includes('SHOPEE')) pmColor = 'text-orange-500 bg-orange-50 border-orange-200';
-      else if (formattedId.includes('LINKAJA')) pmColor = 'text-red-600 bg-red-50 border-red-200';
-      else pmColor = 'text-rose-500 bg-rose-50 border-rose-200';
-    } else {
-      if (formattedId.includes('BCA')) pmColor = 'text-blue-800 bg-blue-50 border-blue-200';
-      else if (formattedId.includes('MANDIRI')) pmColor = 'text-yellow-600 bg-yellow-50 border-yellow-200';
-      else if (formattedId.includes('BNI')) pmColor = 'text-orange-700 bg-orange-50 border-orange-200';
-      else if (formattedId.includes('BRI')) pmColor = 'text-blue-600 bg-blue-50 border-blue-200';
-      else pmColor = 'text-green-700 bg-green-50 border-green-200';
-    }
-
-    const newPm = {
-      id: formattedId,
-      name: pmForm.name,
-      type: pmForm.type,
-      fee: pmForm.fee,
-      is_active: pmForm.is_active,
-      color: pmColor
-    };
-
-    if (editingPm) {
-      const index = updatedList.findIndex(pm => pm.id === editingPm.id);
-      if (index !== -1) {
-        updatedList[index] = newPm;
-      }
-    } else {
-      if (updatedList.some(pm => pm.id === formattedId)) {
-        showAlert("Peringatan", "Kode ID sudah terdaftar.", "danger");
-        return;
-      }
-      updatedList.push(newPm);
-    }
-
-    setPaymentMethods(updatedList);
-    setPmModalOpen(false);
-  };
-
-  const handleDeletePm = (pmId: string) => {
-    showConfirm(
-      'Hapus Metode Pembayaran',
-      `Apakah Anda yakin ingin menghapus metode pembayaran ${pmId}?`,
-      () => {
-        const updatedList = paymentMethods.filter(pm => pm.id !== pmId);
-        setPaymentMethods(updatedList);
-      },
-      'danger'
-    );
-  };
-
-  const handleDeleteAllPms = () => {
-    showConfirm(
-      'Hapus Semua Metode Pembayaran',
-      'Apakah Anda yakin ingin menghapus SEMUA metode pembayaran yang ada? Tindakan ini tidak dapat dibatalkan.',
-      () => {
-        setPaymentMethods([]);
-      },
-      'danger'
-    );
-  };
-
-  const handleLoadDefaultPms = () => {
-    const loadAction = () => {
-      const defaults = [
-        { id: 'QRIS', name: 'QRIS (GoPay, OVO, LinkAja, dll)', type: 'E-Wallet', fee: 0, is_active: true, color: 'text-rose-500 bg-rose-50 border-rose-200' },
-        { id: 'DANA', name: 'DANA', type: 'E-Wallet', fee: 500, is_active: true, color: 'text-blue-500 bg-blue-50 border-blue-200' },
-        { id: 'OVO', name: 'OVO', type: 'E-Wallet', fee: 500, is_active: true, color: 'text-purple-600 bg-purple-50 border-purple-200' },
-        { id: 'GOPAY', name: 'GoPay', type: 'E-Wallet', fee: 500, is_active: true, color: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
-        { id: 'SHOPEEPAY', name: 'ShopeePay', type: 'E-Wallet', fee: 500, is_active: true, color: 'text-orange-500 bg-orange-50 border-orange-200' },
-        { id: 'LINKAJA', name: 'LinkAja', type: 'E-Wallet', fee: 500, is_active: true, color: 'text-red-600 bg-red-50 border-red-200' },
-        { id: 'VA_BCA', name: 'BCA Virtual Account', type: 'Transfer Bank', fee: 1000, is_active: true, color: 'text-blue-800 bg-blue-50 border-blue-200' },
-        { id: 'VA_MANDIRI', name: 'Mandiri Virtual Account', type: 'Transfer Bank', fee: 1000, is_active: true, color: 'text-yellow-600 bg-yellow-50 border-yellow-200' },
-        { id: 'VA_BNI', name: 'BNI Virtual Account', type: 'Transfer Bank', fee: 1000, is_active: true, color: 'text-orange-700 bg-orange-50 border-orange-200' },
-        { id: 'VA_BRI', name: 'BRI Virtual Account', type: 'Transfer Bank', fee: 1000, is_active: true, color: 'text-blue-600 bg-blue-50 border-blue-200' },
-        { id: 'VA_PERMATA', name: 'Permata Virtual Account', type: 'Transfer Bank', fee: 1000, is_active: true, color: 'text-green-700 bg-green-50 border-green-200' },
-      ];
-      
-      const merged = [...paymentMethods];
-      defaults.forEach(def => {
-        if (!merged.some(m => m.id === def.id)) {
-          merged.push(def);
-        }
-      });
-
-      setPaymentMethods(merged);
-    };
-
-    if (paymentMethods.length > 0) {
-      showConfirm(
-        'Muat Metode Default',
-        'Muat default akan menggabungkan atau menimpa metode pembayaran saat ini. Lanjutkan?',
-        loadAction,
-        'warning'
-      );
-    } else {
-      loadAction();
-    }
-  };
-
-  const handleSavePaymentMethodsSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSettingsSubmitting(true);
-    try {
-      const res = await api.updateAdminPaymentMethods(paymentMethods);
-      if (res.success) {
-        setSuccessMsg('Metode pembayaran berhasil disimpan.');
-      } else {
-        setError(res.message || 'Gagal menyimpan metode pembayaran.');
-      }
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Gagal terhubung ke server.');
-    } finally {
-      setSettingsSubmitting(false);
-    }
-  };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -777,6 +631,21 @@ export default function AdminDashboard() {
       });
     }
     setUserModalOpen(true);
+  };
+
+  const handleOpenBalanceHistory = async (user: User) => {
+    setBalanceHistoryUser(user);
+    setLoadingBalanceHistory(true);
+    setAdminUserBalanceHistoryModalOpen(true);
+    try {
+      const data = await api.getAdminUserBalanceHistory(user.id);
+      setSelectedBalanceHistories(data);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Gagal memuat riwayat saldo.');
+    } finally {
+      setLoadingBalanceHistory(false);
+    }
   };
 
   const handleSaveUser = async (e: React.FormEvent) => {
@@ -2957,10 +2826,10 @@ export default function AdminDashboard() {
                   {activeTab === 'users' && 'Pengguna'}
                   {activeTab === 'products' && 'Produk'}
                   {activeTab === 'settings' && 'API Config'}
+                  {activeTab === 'midtrans' && 'Konfigurasi Midtrans'}
                   {activeTab === 'digiflazz_topup' && 'Isi Saldo Digiflazz'}
                   {activeTab === 'topup_requests' && 'Persetujuan Topup'}
                   {activeTab === 'topup_methods' && 'Metode Transfer'}
-                  {activeTab === 'payment_methods' && 'Metode Pembayaran'}
                   {activeTab === 'games' && 'Brand / Game'}
                   {activeTab === 'web_settings' && 'Identitas Web'}
                   {activeTab === 'vouchers' && 'Voucher'}
@@ -2989,8 +2858,8 @@ export default function AdminDashboard() {
                     { key: 'announcements', name: 'Pengumuman' },
                     { key: 'topup_requests', name: 'Persetujuan Topup' },
                     { key: 'topup_methods', name: 'Metode Transfer' },
-                    { key: 'payment_methods', name: 'Metode Pembayaran' },
                     { key: 'settings', name: 'API Config' },
+                    { key: 'midtrans', name: 'Konfigurasi Midtrans' },
                     { key: 'digiflazz_topup', name: 'Isi Saldo Digiflazz' },
                     { key: 'web_settings', name: 'Identitas Web' },
                     { key: 'tickets', name: 'Tiket Bantuan' }
@@ -3191,19 +3060,6 @@ export default function AdminDashboard() {
                 <span>Metode Transfer</span>
               </button>
 
-              <button
-                onClick={() => setActiveTab('payment_methods')}
-                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
-                  activeTab === 'payment_methods'
-                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
-                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
-                }`}
-              >
-                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-                <span>Metode Pembayaran</span>
-              </button>
             </div>
 
             {/* Group: Digiflazz */}
@@ -3239,6 +3095,27 @@ export default function AdminDashboard() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <span>Isi Saldo</span>
+              </button>
+            </div>
+
+            {/* Group: Midtrans */}
+            <div className="space-y-1">
+              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-3 mb-1.5 block">
+                Midtrans
+              </span>
+              
+              <button
+                onClick={() => setActiveTab('midtrans')}
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                  activeTab === 'midtrans'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                </svg>
+                <span>Konfigurasi Midtrans</span>
               </button>
             </div>
 
@@ -3547,7 +3424,13 @@ export default function AdminDashboard() {
                   </div>
                   <div className="flex justify-between items-center pt-2 border-t border-slate-50 text-[10px] text-slate-400">
                     <span>Terdaftar: {new Date(usr.created_at).toLocaleDateString('id-ID')}</span>
-                    <div className="space-x-3 text-xs">
+                    <div className="space-x-2.5 text-xs">
+                      <button
+                        onClick={() => handleOpenBalanceHistory(usr)}
+                        className="font-bold text-emerald-600 hover:underline cursor-pointer"
+                      >
+                        Riwayat Saldo
+                      </button>
                       <button
                         onClick={() => handleOpenUserModal(usr)}
                         className="font-bold text-primary hover:underline cursor-pointer"
@@ -3606,7 +3489,13 @@ export default function AdminDashboard() {
                         <td className="px-6 py-4 text-xs text-foreground/50">
                           {new Date(usr.created_at).toLocaleDateString('id-ID')}
                         </td>
-                        <td className="px-6 py-4 text-right space-x-2 whitespace-nowrap">
+                        <td className="px-6 py-4 text-right space-x-3 whitespace-nowrap">
+                          <button
+                            onClick={() => handleOpenBalanceHistory(usr)}
+                            className="inline-flex items-center text-xs font-bold text-emerald-600 hover:underline cursor-pointer"
+                          >
+                            Riwayat Saldo
+                          </button>
                           <button
                             onClick={() => handleOpenUserModal(usr)}
                             className="inline-flex items-center text-xs font-bold text-primary hover:underline cursor-pointer"
@@ -3729,6 +3618,99 @@ export default function AdminDashboard() {
                     </button>
                   </div>
                 </form>
+              </div>
+            </div>
+          )}
+
+          {adminUserBalanceHistoryModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-300">
+              <div className="bg-white w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl shadow-2xl border-t sm:border border-border overflow-hidden animate-in slide-in-from-bottom sm:zoom-in duration-300 max-h-[85vh] flex flex-col">
+                <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
+                  <div>
+                    <h3 className="text-base font-bold text-foreground font-heading">
+                      Riwayat Saldo Pengguna
+                    </h3>
+                    <p className="text-[11px] text-foreground/45 mt-0.5 font-semibold">
+                      {balanceHistoryUser ? `${balanceHistoryUser.name} (${balanceHistoryUser.email})` : ''}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setAdminUserBalanceHistoryModalOpen(false)}
+                    className="text-slate-400 hover:text-foreground focus:outline-none p-1 cursor-pointer bg-transparent border-0"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="p-5 overflow-y-auto min-h-[300px] max-h-[50vh]">
+                  {loadingBalanceHistory ? (
+                    <div className="flex flex-col items-center justify-center py-20">
+                      <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                      <span className="text-xs text-foreground/60 mt-4 font-bold">Memuat riwayat saldo...</span>
+                    </div>
+                  ) : selectedBalanceHistories.length === 0 ? (
+                    <div className="text-center py-16 text-slate-400 text-xs font-semibold">
+                      Belum ada riwayat mutasi saldo terdaftar untuk pengguna ini.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-border text-slate-500 font-bold uppercase tracking-wider">
+                            <th className="px-4 py-3">Tanggal</th>
+                            <th className="px-4 py-3">Tipe</th>
+                            <th className="px-4 py-3">Nominal</th>
+                            <th className="px-4 py-3">Keterangan</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {selectedBalanceHistories.map((hist) => (
+                            <tr key={hist.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-4 py-4 whitespace-nowrap text-slate-500 font-medium">
+                                {new Date(hist.created_at).toLocaleString('id-ID', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </td>
+                              <td className="px-4 py-4 whitespace-nowrap">
+                                {hist.type === 'addition' ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
+                                    Penambahan
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200 uppercase">
+                                    Pengurangan
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-4 whitespace-nowrap font-bold">
+                                {hist.type === 'addition' ? (
+                                  <span className="text-emerald-600 font-extrabold">+ {formatPrice(hist.amount)}</span>
+                                ) : (
+                                  <span className="text-rose-600 font-extrabold">- {formatPrice(hist.amount)}</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-4 text-slate-700 font-medium font-sans">
+                                {hist.description}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+                <div className="p-5 border-t border-border flex items-center justify-end bg-slate-50 shrink-0">
+                  <button
+                    onClick={() => setAdminUserBalanceHistoryModalOpen(false)}
+                    className="px-5 py-3 text-xs font-bold uppercase tracking-wider rounded-xl text-slate-500 hover:bg-slate-100 transition-colors cursor-pointer bg-transparent border-0"
+                  >
+                    Tutup
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -4155,6 +4137,107 @@ export default function AdminDashboard() {
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: MIDTRANS CONFIG */}
+      {activeTab === 'midtrans' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in duration-300 text-xs">
+          {/* Settings Form Wrapper */}
+          <div className="md:col-span-2 space-y-6">
+            <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm">
+              <h2 className="text-base md:text-lg font-bold text-foreground font-heading mb-5">Konfigurasi Midtrans Payment Gateway</h2>
+              <form onSubmit={handleSaveMidtransSettings} className="space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Status Aktif</label>
+                    <div
+                      onClick={() => setSettingsForm({ ...settingsForm, midtrans_is_active: !settingsForm.midtrans_is_active })}
+                      className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between cursor-pointer select-none transition-all hover:bg-slate-100/50 min-h-[42px]"
+                    >
+                      <span className="text-xs font-semibold text-foreground/80">
+                        {settingsForm.midtrans_is_active ? 'Aktif (Gunakan Midtrans)' : 'Non-Aktif (Sembunyikan)'}
+                      </span>
+                      <button
+                        type="button"
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          settingsForm.midtrans_is_active ? 'bg-primary' : 'bg-slate-300'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            settingsForm.midtrans_is_active ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Midtrans Mode</label>
+                    <select
+                      value={settingsForm.midtrans_mode}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, midtrans_mode: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-semibold cursor-pointer"
+                    >
+                      <option value="sandbox">Sandbox (Testing / Demo)</option>
+                      <option value="production">Production (Live Payments)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Client Key</label>
+                  <input
+                    type="text"
+                    required
+                    value={settingsForm.midtrans_client_key}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, midtrans_client_key: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground placeholder-slate-400 font-semibold"
+                    placeholder="Contoh: SB-Mid-client-XXXXX"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Server Key</label>
+                  <input
+                    type="password"
+                    required
+                    value={settingsForm.midtrans_server_key}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, midtrans_server_key: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground placeholder-slate-400 font-mono"
+                    placeholder="Contoh: SB-Mid-server-XXXXX"
+                  />
+                </div>
+
+                <div className="pt-1">
+                  <button
+                    type="submit"
+                    disabled={settingsSubmitting}
+                    className="glow-button px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider disabled:opacity-50 cursor-pointer"
+                  >
+                    {settingsSubmitting ? 'Menyimpan...' : 'Simpan Konfigurasi'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          {/* Right Column: Webhook URL */}
+          <div className="flex flex-col gap-6">
+            <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm flex flex-col space-y-4">
+              <div>
+                <h2 className="text-base md:text-lg font-bold text-foreground font-heading mb-1">Webhook URL Notification</h2>
+                <p className="text-xs text-foreground/45">Daftarkan URL ini di dashboard Midtrans (Settings &rarr; Payment &rarr; Notification URL)</p>
+              </div>
+
+              <div className="bg-slate-50 p-4.5 rounded-2xl border border-slate-100 flex flex-col items-center justify-center space-y-2">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block leading-none">URL Callback Webhook</span>
+                <span className="text-sm md:text-base font-mono font-bold text-foreground select-all break-all text-center">
+                  {typeof window !== 'undefined' ? `${window.location.origin.replace('3000', '8000')}/api/webhooks/midtrans` : 'Memuat...'}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -4596,278 +4679,8 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
-
-      {/* TAB 7: PAYMENT METHODS */}
-      {activeTab === 'payment_methods' && (
-        <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm text-xs animate-in fade-in duration-300">
-          <form onSubmit={handleSavePaymentMethodsSettings} className="space-y-6">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-              <div>
-                <h2 className="text-base md:text-lg font-bold text-foreground font-heading">
-                  Kelola Metode Pembayaran Transaksi (Checkout)
-                </h2>
-                <p className="text-xs text-foreground/45 mt-1">
-                  Metode pembayaran di bawah akan muncul pada checkout user (Saldo selalu aktif).
-                </p>
-              </div>
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0 lg:justify-end">
-                <button
-                  type="button"
-                  onClick={handleLoadDefaultPms}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 font-bold text-xs text-foreground transition-all cursor-pointer shadow-xs whitespace-nowrap text-center"
-                >
-                  Muat Metode Default
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleOpenPmModal(null)}
-                  className="px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-hover font-bold text-xs text-white transition-all cursor-pointer shadow-xs whitespace-nowrap text-center"
-                >
-                  Tambah Metode Baru
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDeleteAllPms}
-                  className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 font-bold text-xs text-white transition-all cursor-pointer shadow-xs whitespace-nowrap text-center"
-                >
-                  Hapus Semua Metode
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {/* E-Wallet Group */}
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                <h4 className="font-extrabold text-xs text-slate-500 uppercase mb-3 tracking-wider">Kategori: E-Wallet</h4>
-                {paymentMethods.filter((m: any) => m.type === 'E-Wallet').length === 0 ? (
-                  <p className="text-xs text-foreground/40 italic py-4 text-center">Belum ada metode pembayaran E-Wallet yang ditambahkan.</p>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {paymentMethods.filter((m: any) => m.type === 'E-Wallet').map((m: any) => {
-                      const originalIndex = paymentMethods.findIndex((pm: any) => pm.id === m.id);
-                      return (
-                        <div key={m.id} className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between shadow-xs gap-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="font-bold text-slate-800 text-xs flex flex-wrap items-center gap-2">
-                                <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase border ${m.color || 'bg-slate-100 text-slate-600'} shrink-0`}>
-                                  {m.id}
-                                </span>
-                                <span className="truncate">{m.name}</span>
-                              </p>
-                              <p className="text-xs text-foreground/45 mt-1.5">Biaya Admin: <strong>{formatPrice(m.fee)}</strong></p>
-                            </div>
-                            
-                            <button
-                              type="button"
-                              onClick={() => toggleMethodActive(originalIndex)}
-                              className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase transition-all cursor-pointer shrink-0 ${
-                                m.is_active 
-                                  ? 'bg-success/15 text-success border border-success/20 hover:bg-success/25' 
-                                  : 'bg-slate-100 text-slate-400 border border-slate-200 hover:bg-slate-250'
-                              }`}
-                            >
-                              {m.is_active ? 'Aktif' : 'Off'}
-                            </button>
-                          </div>
-                          
-                          <div className="flex items-center justify-end space-x-2 pt-2.5 border-t border-slate-100">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenPmModal(m)}
-                              className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-600 cursor-pointer font-bold text-[9px] uppercase tracking-wider transition-colors"
-                              title="Edit"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeletePm(m.id)}
-                              className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 cursor-pointer font-bold text-[9px] uppercase tracking-wider transition-colors"
-                              title="Hapus"
-                            >
-                              Hapus
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Transfer Bank Group */}
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                <h4 className="font-extrabold text-xs text-slate-500 uppercase mb-3 tracking-wider">Kategori: Virtual Account</h4>
-                {paymentMethods.filter((m: any) => m.type === 'Transfer Bank').length === 0 ? (
-                  <p className="text-xs text-foreground/40 italic py-4 text-center">Belum ada metode pembayaran Virtual Account yang ditambahkan.</p>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {paymentMethods.filter((m: any) => m.type === 'Transfer Bank').map((m: any) => {
-                      const originalIndex = paymentMethods.findIndex((pm: any) => pm.id === m.id);
-                      return (
-                        <div key={m.id} className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between shadow-xs gap-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="font-bold text-slate-800 text-xs flex flex-wrap items-center gap-2">
-                                <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase border ${m.color || 'bg-slate-100 text-slate-600'} shrink-0`}>
-                                  {m.id.replace('VA_', '')}
-                                </span>
-                                <span className="truncate">{m.name}</span>
-                              </p>
-                              <p className="text-xs text-foreground/45 mt-1.5">Biaya Admin: <strong>{formatPrice(m.fee)}</strong></p>
-                            </div>
-                            
-                            <button
-                              type="button"
-                              onClick={() => toggleMethodActive(originalIndex)}
-                              className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase transition-all cursor-pointer shrink-0 ${
-                                m.is_active 
-                                  ? 'bg-success/15 text-success border border-success/20 hover:bg-success/25' 
-                                  : 'bg-slate-100 text-slate-400 border border-slate-200 hover:bg-slate-250'
-                              }`}
-                            >
-                              {m.is_active ? 'Aktif' : 'Off'}
-                            </button>
-                          </div>
-                          
-                          <div className="flex items-center justify-end space-x-2 pt-2.5 border-t border-slate-100">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenPmModal(m)}
-                              className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-600 cursor-pointer font-bold text-[9px] uppercase tracking-wider transition-colors"
-                              title="Edit"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeletePm(m.id)}
-                              className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 cursor-pointer font-bold text-[9px] uppercase tracking-wider transition-colors"
-                              title="Hapus"
-                            >
-                              Hapus
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-slate-100 flex justify-end">
-              <button
-                type="submit"
-                disabled={settingsSubmitting}
-                className="glow-button px-6 py-3.5 rounded-xl text-xs font-bold uppercase tracking-wider disabled:opacity-50 cursor-pointer shadow-md"
-              >
-                {settingsSubmitting ? 'Menyimpan...' : 'Simpan Perubahan Metode Pembayaran'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
         </div>
       </div>
-
-      {/* Create/Edit Payment Method Modal */}
-      {pmModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 text-xs">
-          <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl border-t sm:border border-border overflow-hidden animate-in slide-in-from-bottom sm:zoom-in duration-300 max-h-[90vh] flex flex-col">
-            <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
-              <h3 className="text-base font-bold text-foreground font-heading">
-                {editingPm ? 'Edit Metode Pembayaran' : 'Tambah Metode Pembayaran Baru'}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setPmModalOpen(false)}
-                className="text-slate-400 hover:text-foreground focus:outline-none p-1 cursor-pointer"
-              >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <form onSubmit={handleSavePm} className="overflow-y-auto flex-grow">
-              <div className="p-5 space-y-4 text-xs">
-                <div>
-                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Kode ID (e.g. GOPAY, VA_BNI)</label>
-                  <input
-                    type="text"
-                    required
-                    disabled={!!editingPm}
-                    value={pmForm.id}
-                    onChange={(e) => setPmForm({ ...pmForm, id: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-mono disabled:opacity-55"
-                    placeholder="Contoh: GOPAY, VA_BNI, OVO"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Nama Metode Pembayaran</label>
-                  <input
-                    type="text"
-                    required
-                    value={pmForm.name}
-                    onChange={(e) => setPmForm({ ...pmForm, name: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-semibold"
-                    placeholder="Contoh: GoPay, BNI Virtual Account"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Kategori / Tipe</label>
-                  <select
-                    value={pmForm.type}
-                    onChange={(e) => setPmForm({ ...pmForm, type: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-semibold cursor-pointer"
-                  >
-                    <option value="E-Wallet">E-Wallet</option>
-                    <option value="Transfer Bank">Transfer Bank / Virtual Account</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Biaya Admin (Rp)</label>
-                  <input
-                    type="number"
-                    required
-                    value={pmForm.fee}
-                    onChange={(e) => setPmForm({ ...pmForm, fee: parseInt(e.target.value) || 0 })}
-                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-bold"
-                    placeholder="Contoh: 500 atau 1000"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Status Aktif</label>
-                  <select
-                    value={pmForm.is_active ? 'aktif' : 'nonaktif'}
-                    onChange={(e) => setPmForm({ ...pmForm, is_active: e.target.value === 'aktif' })}
-                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground font-semibold cursor-pointer"
-                  >
-                    <option value="aktif">Aktif (Muncul di Checkout)</option>
-                    <option value="nonaktif">Non-Aktif (Sembunyikan)</option>
-                  </select>
-                </div>
-              </div>
-              <div className="p-5 border-t border-border shrink-0 flex items-center justify-end space-x-2 bg-slate-50">
-                <button
-                  type="button"
-                  onClick={() => setPmModalOpen(false)}
-                  className="px-4 py-2 border border-slate-200 rounded-lg text-slate-500 font-bold hover:bg-slate-100 transition-colors uppercase tracking-wider cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-primary text-white rounded-lg font-bold hover:bg-primary-hover active:bg-primary-dark transition-colors uppercase tracking-wider cursor-pointer shadow-sm"
-                >
-                  Simpan
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Voucher Modal Form */}
       {voucherModalOpen && (

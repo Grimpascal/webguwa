@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useState, use } from 'react';
+import { useEffect, useState, use, useRef } from 'react';
 import Link from 'next/link';
 import { api, Transaction, getAssetUrl } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+import * as htmlToImage from 'html-to-image';
+import Script from 'next/script';
 
 interface PageProps {
   params: Promise<{ invoice_id: string }>;
@@ -20,7 +22,12 @@ export default function InvoiceDetail({ params }: PageProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [dbPaymentMethods, setDbPaymentMethods] = useState<any[]>([]);
   const [webName, setWebName] = useState('YOI Store');
+  const [midtransActive, setMidtransActive] = useState(false);
+  const [midtransClientKey, setMidtransClientKey] = useState('');
+  const [midtransMode, setMidtransMode] = useState('sandbox');
   const [successMsg, setSuccessMsg] = useState('');
+  const [customShopName, setCustomShopName] = useState('');
+  const [customPrice, setCustomPrice] = useState<number | ''>('');
 
   // Auto-dismiss success message
   useEffect(() => {
@@ -29,6 +36,63 @@ export default function InvoiceDetail({ params }: PageProps) {
       return () => clearTimeout(timer);
     }
   }, [successMsg]);
+
+  // Load custom shop name from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedName = localStorage.getItem('yoi_nota_shop_name');
+      if (savedName) {
+        setCustomShopName(savedName);
+      }
+    }
+  }, []);
+
+  const handleShopNameChange = (val: string) => {
+    setCustomShopName(val);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('yoi_nota_shop_name', val);
+    }
+  };
+
+  // Set customPrice to totalAmount when transaction and dbPaymentMethods are loaded for the first time
+  useEffect(() => {
+    if (transaction && dbPaymentMethods.length > 0 && customPrice === '') {
+      const matchedMethod = dbPaymentMethods.find((pm) => pm.id === transaction.payment_method);
+      const fee = transaction.payment_method === 'SALDO' ? 0 : (matchedMethod ? parseFloat(matchedMethod.fee) : 0);
+      const totalAmount = parseFloat(transaction.amount) + fee;
+      setCustomPrice(totalAmount);
+    }
+  }, [transaction, dbPaymentMethods, customPrice]);
+
+  const receiptRef = useRef<HTMLDivElement>(null);
+  const [downloadingImage, setDownloadingImage] = useState(false);
+
+  const downloadReceiptImage = () => {
+    if (receiptRef.current === null) return;
+    setDownloadingImage(true);
+    
+    htmlToImage.toPng(receiptRef.current, { 
+      backgroundColor: '#ffffff',
+      style: {
+        transform: 'scale(1)',
+        margin: '0',
+        padding: '20px'
+      }
+    })
+      .then((dataUrl) => {
+        const link = document.createElement('a');
+        link.download = `nota-${transaction?.invoice_id}.png`;
+        link.href = dataUrl;
+        link.click();
+        setSuccessMsg('Nota berhasil diunduh sebagai gambar PNG!');
+        setDownloadingImage(false);
+      })
+      .catch((err) => {
+        console.error('Failed to generate receipt image:', err);
+        showAlert('Gagal', 'Gagal mengunduh gambar nota belanja.', 'danger');
+        setDownloadingImage(false);
+      });
+  };
 
   // Alert modal state
   const [alertModal, setAlertModal] = useState<{
@@ -56,12 +120,15 @@ export default function InvoiceDetail({ params }: PageProps) {
     api.getPaymentMethods()
       .then(methods => setDbPaymentMethods(methods))
       .catch(err => console.error("Gagal memuat metode pembayaran di invoice", err));
-
+ 
     api.getPublicSettings()
       .then(settings => {
         if (settings.web_name) setWebName(settings.web_name);
+        if (settings.midtrans_is_active) setMidtransActive(settings.midtrans_is_active);
+        if (settings.midtrans_client_key) setMidtransClientKey(settings.midtrans_client_key);
+        if (settings.midtrans_mode) setMidtransMode(settings.midtrans_mode);
       })
-      .catch(err => console.error("Gagal memuat setting web_name di invoice", err));
+      .catch(err => console.error("Gagal memuat settings di invoice", err));
   }, []);
 
   async function loadTransaction(showLoading = false) {
@@ -110,6 +177,35 @@ export default function InvoiceDetail({ params }: PageProps) {
       showAlert('Gagal', err.message || 'Gagal memproses simulasi pembayaran', 'danger');
     } finally {
       setPaying(false);
+    }
+  };
+
+  const handleMidtransPay = () => {
+    if (!transaction?.snap_token) {
+      showAlert('Gagal', 'Token pembayaran Midtrans tidak ditemukan.', 'danger');
+      return;
+    }
+ 
+    if (typeof window !== 'undefined' && (window as any).snap) {
+      (window as any).snap.pay(transaction.snap_token, {
+        onSuccess: (result: any) => {
+          showAlert('Sukses', 'Pembayaran Anda berhasil diverifikasi!', 'success');
+          loadTransaction(true);
+        },
+        onPending: (result: any) => {
+          showAlert('Pending', 'Pembayaran sedang diproses, silakan selesaikan tagihan Anda.', 'info');
+          loadTransaction(true);
+        },
+        onError: (result: any) => {
+          showAlert('Gagal', 'Pembayaran gagal. Silakan coba kembali.', 'danger');
+          loadTransaction(true);
+        },
+        onClose: () => {
+          showAlert('Info', 'Anda menutup panel pembayaran sebelum selesai.', 'warning');
+        }
+      });
+    } else {
+      showAlert('Peringatan', 'Layanan pembayaran Midtrans sedang dimuat, silakan coba lagi dalam beberapa detik.', 'warning');
     }
   };
 
@@ -393,29 +489,184 @@ export default function InvoiceDetail({ params }: PageProps) {
           </div>
         </div>
 
-        {/* Demo Mode Actions: Payment Simulator */}
-        {transaction.payment_status === 'pending' && (
-          <div className="bg-amber-50/50 border border-amber-100 p-6 rounded-2xl shadow-sm text-center">
-            <h4 className="text-sm font-bold text-amber-800 font-heading mb-2">
-              🛠️ Simulator Pembayaran Sandbox (Demo)
-            </h4>
-            <p className="text-xs text-amber-700/80 mb-4 max-w-md mx-auto">
-              Karena Anda berada dalam mode demo, gunakan tombol di bawah ini untuk mensimulasikan pembayaran lunas. 
-              Ini akan memicu status transaksi menjadi <strong>Paid</strong> dan menjalankan proses pengiriman otomatis.
+        {/* Alat Cetak Nota (Reseller) */}
+        {transaction.delivery_status === 'completed' && (
+          <div className="bg-white border border-border rounded-2xl shadow-sm overflow-hidden p-6 mb-6">
+            <h3 className="text-sm font-extrabold text-foreground mb-1 uppercase tracking-wider font-heading flex items-center gap-2">
+              <span>📥 Buat & Unduh Nota Belanja</span>
+            </h3>
+            <p className="text-xs text-foreground/50 mb-5">
+              Kustomisasi struk/nota pembelian untuk pelanggan Anda (cocok untuk Reseller). Perubahan ini hanya untuk gambar unduhan dan tidak mempengaruhi transaksi asli.
             </p>
-            <button
-              onClick={handleSimulatePayment}
-              disabled={paying}
-              className="px-6 py-3 rounded-xl bg-amber-500 hover:bg-amber-600 font-bold uppercase text-xs tracking-wider text-white shadow-md transition-all inline-flex items-center space-x-2 cursor-pointer disabled:opacity-50"
-            >
-              {paying ? (
-                <span>Memproses Pembayaran...</span>
-              ) : (
-                <span>Bayar Sekarang (Simulasi)</span>
-              )}
-            </button>
+
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+              {/* Editor Form */}
+              <div className="md:col-span-5 space-y-4">
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-foreground/60 mb-1.5 tracking-wider">
+                    Nama Toko Anda
+                  </label>
+                  <input
+                    type="text"
+                    value={customShopName}
+                    onChange={(e) => handleShopNameChange(e.target.value)}
+                    placeholder={webName}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  />
+                  <p className="text-[10px] text-foreground/40 mt-1.5 leading-snug">
+                    Jika kosong, otomatis memakai nama default: <span className="font-semibold">{webName}</span>
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-foreground/60 mb-1.5 tracking-wider">
+                    Harga Jual di Nota (Rp)
+                  </label>
+                  <input
+                    type="number"
+                    value={customPrice === '' ? '' : customPrice}
+                    onChange={(e) => setCustomPrice(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                    placeholder={totalAmount.toString()}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  />
+                  <p className="text-[10px] text-foreground/40 mt-1.5 leading-snug">
+                    Harga beli Anda: <span className="font-semibold">{formatCurrency(totalAmount)}</span>
+                  </p>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={downloadReceiptImage}
+                    disabled={downloadingImage}
+                    className="w-full py-3 px-4 rounded-xl bg-primary hover:bg-primary-hover disabled:bg-slate-200 text-white text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:shadow-md"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    <span>{downloadingImage ? 'Mengunduh...' : 'Unduh Gambar Nota (PNG)'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Live Preview Column */}
+              <div className="md:col-span-7 flex flex-col items-center justify-center bg-slate-50/50 rounded-2xl p-4 border border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-foreground/40 mb-3 tracking-wider">Live Preview Struk (Thermal 80mm)</span>
+                
+                {/* Receipt Body */}
+                <div ref={receiptRef} className="w-full max-w-[280px] bg-white text-black p-5 rounded-xl shadow-md border border-slate-200/60 font-mono text-[10px] leading-relaxed flex flex-col items-center">
+                  <div className="font-bold text-xs uppercase text-center tracking-tight leading-tight w-full break-words">
+                    {customShopName || webName}
+                  </div>
+                  <div className="text-[8px] text-slate-500 uppercase mt-0.5 text-center">Struk Pembelian Game</div>
+                  
+                  <div className="w-full border-t border-dashed border-slate-300 my-2" />
+                  
+                  <div className="w-full text-left space-y-0.5 text-[9px]">
+                    <div className="flex justify-between">
+                      <span>No. Invoice:</span>
+                      <span className="font-bold">{transaction.invoice_id}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Tanggal:</span>
+                      <span>{new Date(transaction.created_at).toLocaleDateString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Status:</span>
+                      <span className="font-bold text-emerald-600">{transaction.payment_status === 'paid' ? 'LUNAS' : 'PENDING'}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="w-full border-t border-dashed border-slate-300 my-2" />
+                  
+                  <div className="w-full text-left space-y-1 text-[9px]">
+                    <div className="font-bold uppercase tracking-tight break-words">{transaction.game?.name}</div>
+                    <div className="flex justify-between text-slate-600 pl-2">
+                      <span className="break-words">- {transaction.product?.name}</span>
+                      <span className="shrink-0 ml-2">1x</span>
+                    </div>
+                    <div className="pl-2 text-slate-700">
+                      <span>ID: {transaction.target_id} {transaction.target_zone ? `(${transaction.target_zone})` : ''}</span>
+                    </div>
+                    {transaction.nickname && (
+                      <div className="pl-2 italic text-slate-500">
+                        <span>Nick: {transaction.nickname}</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="w-full border-t border-dashed border-slate-300 my-2" />
+                  
+                  <div className="w-full flex justify-between font-bold text-[11px] pt-0.5">
+                    <span>TOTAL:</span>
+                    <span>{formatCurrency(customPrice || 0)}</span>
+                  </div>
+                  
+                  <div className="w-full border-t border-dashed border-slate-300 my-2" />
+                  
+                  <div className="text-[8px] text-slate-500 uppercase mt-1 font-bold">Terima Kasih</div>
+                  <div className="text-[7px] text-slate-400 text-center">Struk ini adalah bukti pembayaran sah</div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
+
+        {/* Payment Actions */}
+        {transaction.payment_status === 'pending' && (
+          <div className="bg-white border border-border p-6 rounded-2xl shadow-sm text-center space-y-4">
+            {transaction.snap_token ? (
+              <div>
+                <h4 className="text-sm font-extrabold text-foreground font-heading mb-2">
+                  🔒 Selesaikan Pembayaran Anda
+                </h4>
+                <p className="text-xs text-foreground/50 mb-4 max-w-md mx-auto">
+                  Silakan klik tombol di bawah untuk membayar menggunakan Midtrans Secure Payment Gateway.
+                </p>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                  <button
+                    onClick={handleMidtransPay}
+                    className="px-8 py-3 rounded-xl bg-primary hover:bg-primary-hover font-bold uppercase text-xs tracking-wider text-white shadow-md transition-all inline-flex items-center space-x-2 cursor-pointer"
+                  >
+                    <span>Bayar Sekarang (Midtrans)</span>
+                  </button>
+                  
+                  {/* Keep Simulator option for Admin testing */}
+                  {user?.role === 'admin' && (
+                    <button
+                      onClick={handleSimulatePayment}
+                      disabled={paying}
+                      className="px-6 py-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/20 font-bold uppercase text-xs tracking-wider text-amber-600 transition-all inline-flex items-center space-x-2 cursor-pointer disabled:opacity-50"
+                    >
+                      <span>Simulasi Bayar (Admin)</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <h4 className="text-sm font-bold text-amber-800 font-heading mb-2">
+                  🛠️ Simulator Pembayaran Sandbox (Demo)
+                </h4>
+                <p className="text-xs text-amber-700/80 mb-4 max-w-md mx-auto">
+                  Karena Anda berada dalam mode demo atau Midtrans dinonaktifkan, gunakan tombol di bawah ini untuk mensimulasikan pembayaran lunas.
+                </p>
+                <button
+                  onClick={handleSimulatePayment}
+                  disabled={paying}
+                  className="px-6 py-3 rounded-xl bg-amber-500 hover:bg-amber-600 font-bold uppercase text-xs tracking-wider text-white shadow-md transition-all inline-flex items-center space-x-2 cursor-pointer disabled:opacity-50"
+                >
+                  {paying ? (
+                    <span>Memproses Pembayaran...</span>
+                  ) : (
+                    <span>Bayar Sekarang (Simulasi)</span>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
       {/* Custom Alert Modal */}
       {alertModal.isOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -458,6 +709,7 @@ export default function InvoiceDetail({ params }: PageProps) {
           </div>
         </div>
       )}
+
       {successMsg && (
         <div className="fixed bottom-5 right-5 left-5 sm:left-auto bg-success text-white px-5 py-4 rounded-xl shadow-2xl border border-success-hover flex items-center space-x-3 z-50 animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
           <svg className="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
@@ -466,7 +718,21 @@ export default function InvoiceDetail({ params }: PageProps) {
           <span className="font-semibold text-xs leading-snug">{successMsg}</span>
         </div>
       )}
+
+      {midtransActive && midtransClientKey && (
+        <Script
+          id="midtrans-snap"
+          src={midtransMode === 'production' ? 'https://app.midtrans.com/snap/snap.js' : 'https://app.sandbox.midtrans.com/snap/snap.js'}
+          data-client-key={midtransClientKey}
+          strategy="lazyOnload"
+        />
+      )}
     </div>
-    </div>
-  );
+  </div>
+);
 }
+
+
+
+
+

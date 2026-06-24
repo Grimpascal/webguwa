@@ -23,6 +23,20 @@ const getValidatorGameName = (code: string): string | null => {
   return null;
 };
 
+const DEFAULT_MIDTRANS_METHODS = [
+  { id: 'QRIS', name: 'QRIS (GoPay, OVO, LinkAja, dll)', type: 'E-Wallet', fee: 0, color: 'text-rose-500 bg-rose-50 border-rose-200' },
+  { id: 'DANA', name: 'DANA', type: 'E-Wallet', fee: 0, color: 'text-blue-500 bg-blue-50 border-blue-200' },
+  { id: 'OVO', name: 'OVO', type: 'E-Wallet', fee: 0, color: 'text-purple-600 bg-purple-50 border-purple-200' },
+  { id: 'GOPAY', name: 'GoPay', type: 'E-Wallet', fee: 0, color: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
+  { id: 'SHOPEEPAY', name: 'ShopeePay', type: 'E-Wallet', fee: 0, color: 'text-orange-500 bg-orange-50 border-orange-200' },
+  { id: 'LINKAJA', name: 'LinkAja', type: 'E-Wallet', fee: 0, color: 'text-red-600 bg-red-50 border-red-200' },
+  { id: 'VA_BCA', name: 'BCA Virtual Account', type: 'Transfer Bank', fee: 0, color: 'text-blue-800 bg-blue-50 border-blue-200' },
+  { id: 'VA_MANDIRI', name: 'Mandiri Virtual Account', type: 'Transfer Bank', fee: 0, color: 'text-yellow-600 bg-yellow-50 border-yellow-200' },
+  { id: 'VA_BNI', name: 'BNI Virtual Account', type: 'Transfer Bank', fee: 0, color: 'text-teal-600 bg-teal-50 border-teal-200' },
+  { id: 'VA_BRI', name: 'BRI Virtual Account', type: 'Transfer Bank', fee: 0, color: 'text-blue-600 bg-blue-50 border-blue-200' },
+  { id: 'VA_PERMATA', name: 'Permata Virtual Account', type: 'Transfer Bank', fee: 0, color: 'text-green-700 bg-green-50 border-green-200' },
+];
+
 interface PageProps {
   params: Promise<{ slug: string }>;
 }
@@ -50,6 +64,7 @@ export default function GameDetail({ params }: PageProps) {
   const [submitting, setSubmitting] = useState(false);
   const [dbPaymentMethods, setDbPaymentMethods] = useState<any[]>([]);
   const [webName, setWebName] = useState('YOI Store');
+  const [midtransActive, setMidtransActive] = useState(false);
 
   // Voucher states
   const [voucherCode, setVoucherCode] = useState('');
@@ -159,12 +174,17 @@ export default function GameDetail({ params }: PageProps) {
     api.getPublicSettings()
       .then(settings => {
         if (settings.web_name) setWebName(settings.web_name);
+        if (settings.midtrans_is_active) setMidtransActive(settings.midtrans_is_active);
       })
       .catch(err => console.error("Gagal memuat setting web_name di game detail", err));
   }, []);
 
-  const eWalletMethods = dbPaymentMethods.filter((m) => m.type === 'E-Wallet');
-  const bankMethods = dbPaymentMethods.filter((m) => m.type === 'Transfer Bank');
+  const displayPaymentMethods = (midtransActive && dbPaymentMethods.length === 0)
+    ? DEFAULT_MIDTRANS_METHODS
+    : dbPaymentMethods;
+
+  const eWalletMethods = displayPaymentMethods.filter((m) => m.type === 'E-Wallet');
+  const bankMethods = displayPaymentMethods.filter((m) => m.type === 'Transfer Bank');
 
   // Auto-expand payment group if restored or selected
   useEffect(() => {
@@ -175,7 +195,7 @@ export default function GameDetail({ params }: PageProps) {
         setActiveGroup('bank');
       }
     }
-  }, [selectedPayment, dbPaymentMethods]);
+  }, [selectedPayment, dbPaymentMethods, midtransActive]);
 
   useEffect(() => {
     async function loadGame() {
@@ -343,7 +363,7 @@ export default function GameDetail({ params }: PageProps) {
           },
         ]
       : []),
-    ...dbPaymentMethods,
+    ...displayPaymentMethods,
   ];
 
   if (loading) {

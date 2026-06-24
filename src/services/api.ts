@@ -52,6 +52,8 @@ export interface Transaction {
   discount?: string;
   notes: string | null;
   digiflazz_ref_id: string | null;
+  snap_token?: string | null;
+  snap_url?: string | null;
   created_at: string;
   updated_at: string;
   game?: Game;
@@ -97,6 +99,16 @@ export interface User {
   role: 'admin' | 'user';
   balance: string;
   api_token?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BalanceHistory {
+  id: number;
+  user_id: number;
+  type: 'addition' | 'deduction';
+  amount: string;
+  description: string;
   created_at: string;
   updated_at: string;
 }
@@ -292,6 +304,11 @@ export const api = {
     return res.data;
   },
 
+  getUserBalanceHistory: async (): Promise<BalanceHistory[]> => {
+    const res = await fetchAPI('/api/user/balance-history');
+    return res.data;
+  },
+
   // Admin Protected Dashboard
   getAdminTransactions: async (): Promise<Transaction[]> => {
     const res = await fetchAPI('/api/admin/transactions');
@@ -338,6 +355,11 @@ export const api = {
     });
   },
 
+  getAdminUserBalanceHistory: async (userId: number): Promise<BalanceHistory[]> => {
+    const res = await fetchAPI(`/api/admin/users/${userId}/balance-history`);
+    return res.data;
+  },
+
   // Admin Digiflazz Settings
   getAdminSettings: async () => {
     const res = await fetchAPI('/api/admin/settings');
@@ -373,6 +395,9 @@ export const api = {
     footer_whatsapp?: string;
     footer_email?: string;
     footer_working_hours?: string;
+    midtrans_is_active?: boolean;
+    midtrans_client_key?: string;
+    midtrans_mode?: string;
   }> => {
     const res = await fetchAPI('/api/settings/public');
     return res.data;

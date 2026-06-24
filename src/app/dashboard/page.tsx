@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { api, Transaction, Game, TopupMethod, TopupRequest, Announcement, getAssetUrl, Ticket, TicketMessage } from '@/services/api';
+import { api, Transaction, Game, TopupMethod, TopupRequest, Announcement, getAssetUrl, Ticket, TicketMessage, BalanceHistory } from '@/services/api';
 import Link from 'next/link';
+import * as htmlToImage from 'html-to-image';
 
-type TabType = 'dashboard' | 'topup' | 'transactions' | 'topup_history' | 'profile' | 'developer' | 'tickets';
+type TabType = 'dashboard' | 'topup' | 'transactions' | 'topup_history' | 'balance_history' | 'profile' | 'developer' | 'tickets';
 
 const CATEGORIES = [
   { id: 'games', name: 'Game Voucher', icon: '🎮', color: 'bg-primary/10 text-primary' },
@@ -38,6 +39,63 @@ export default function UserDashboard() {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  // Nota Modal state
+  const [notaModalTransaction, setNotaModalTransaction] = useState<Transaction | null>(null);
+  const [customShopName, setCustomShopName] = useState('');
+  const [customPrice, setCustomPrice] = useState<number | ''>('');
+
+  // Load custom shop name from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedName = localStorage.getItem('yoi_nota_shop_name');
+      if (savedName) {
+        setCustomShopName(savedName);
+      }
+    }
+  }, []);
+
+  const handleShopNameChange = (val: string) => {
+    setCustomShopName(val);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('yoi_nota_shop_name', val);
+    }
+  };
+
+  const handleOpenNotaModal = (tx: Transaction) => {
+    setNotaModalTransaction(tx);
+    setCustomPrice(parseFloat(tx.amount));
+  };
+
+  const receiptRef = useRef<HTMLDivElement>(null);
+  const [downloadingImage, setDownloadingImage] = useState(false);
+
+  const downloadReceiptImage = () => {
+    if (receiptRef.current === null) return;
+    setDownloadingImage(true);
+    
+    htmlToImage.toPng(receiptRef.current, { 
+      backgroundColor: '#ffffff',
+      style: {
+        transform: 'scale(1)',
+        margin: '0',
+        padding: '20px'
+      }
+    })
+      .then((dataUrl) => {
+        const link = document.createElement('a');
+        link.download = `nota-${notaModalTransaction?.invoice_id}.png`;
+        link.href = dataUrl;
+        link.click();
+        setSuccessMsg('Nota berhasil diunduh sebagai gambar PNG!');
+        setDownloadingImage(false);
+      })
+      .catch((err) => {
+        console.error('Failed to generate receipt image:', err);
+        setError('Gagal mengunduh gambar nota belanja.');
+        setDownloadingImage(false);
+      });
+  };
+
   // Category selection state
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [webName, setWebName] = useState('YOI Store');
@@ -45,6 +103,7 @@ export default function UserDashboard() {
   // Top-up states
   const [topupMethods, setTopupMethods] = useState<TopupMethod[]>([]);
   const [topupRequests, setTopupRequests] = useState<TopupRequest[]>([]);
+  const [balanceHistories, setBalanceHistories] = useState<BalanceHistory[]>([]);
   const [selectedMethodId, setSelectedMethodId] = useState<number | null>(null);
   const [topupAmount, setTopupAmount] = useState('');
   const [topupLoading, setTopupLoading] = useState(false);
@@ -265,22 +324,30 @@ export default function UserDashboard() {
     }
   }, [isAuthenticated]);
 
+  useEffect(() => {
+    if (activeTab === 'balance_history' && isAuthenticated) {
+      api.getUserBalanceHistory().then(data => setBalanceHistories(data)).catch(console.error);
+    }
+  }, [activeTab, isAuthenticated]);
+
   async function loadDashboardData() {
     try {
       setFetching(true);
-      const [txsData, gamesData, methodsData, requestsData, publicSettingsData, announcementsData, ticketsData] = await Promise.all([
+      const [txsData, gamesData, methodsData, requestsData, publicSettingsData, announcementsData, ticketsData, balanceHistData] = await Promise.all([
         api.getUserTransactions(),
         api.getGames(),
         api.getTopupMethods(),
         api.getTopupRequests(),
         api.getPublicSettings(),
         api.getAnnouncements(),
-        api.getUserTickets()
+        api.getUserTickets(),
+        api.getUserBalanceHistory()
       ]);
       setTransactions(txsData);
       setGames(gamesData);
       setTopupMethods(methodsData);
       setTopupRequests(requestsData);
+      setBalanceHistories(balanceHistData);
       setAnnouncements(announcementsData || []);
       setTickets(ticketsData || []);
       if (publicSettingsData?.web_name) {
@@ -473,17 +540,126 @@ export default function UserDashboard() {
 
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-1 gap-6">
-          {/* Card Saldo Utama */}
-          <div className="max-w-md relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border border-slate-800 p-6 shadow-xl text-white">
+        {/* Top Row: E-Wallet Card (Left) and Announcements / Quick Info (Right) */}
+        {announcements.length > 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+            {/* Left: Card Saldo Utama */}
+            <div className="lg:col-span-1 relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border border-slate-800 p-6 shadow-xl text-white flex flex-col justify-between min-h-[220px]">
+              {/* Background elements */}
+              <div className="absolute top-0 right-0 w-36 h-36 bg-primary/20 rounded-full blur-2xl -mr-10 -mt-10" />
+              <div className="absolute bottom-0 left-0 w-24 h-24 bg-purple-500/10 rounded-full blur-xl -ml-6 -mb-6" />
+
+              <div className="relative flex flex-col h-full justify-between">
+                <div>
+                  <div className="flex justify-between items-center mb-6">
+                    <span className="text-xs font-bold tracking-widest text-slate-400 uppercase">{(webName || '').split(' ')[0] || 'YOI'} E-WALLET</span>
+                    {/* Decorative credit card chip */}
+                    <div className="w-10 h-7 rounded bg-amber-500/80 opacity-90 relative overflow-hidden flex items-center justify-center">
+                      <div className="absolute inset-0 border border-amber-600/30 grid grid-cols-3 grid-rows-3" />
+                    </div>
+                  </div>
+                  
+                  <span className="text-xs text-slate-400 font-medium block mb-1">Total Saldo Anda</span>
+                  <span className="text-3xl font-extrabold font-heading tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-indigo-200">
+                    {formatPrice(user?.balance || 0)}
+                  </span>
+                </div>
+
+                <div className="mt-8 flex justify-between items-end">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Pemegang Kartu</span>
+                    <span className="text-sm font-bold tracking-wide uppercase text-slate-200 truncate max-w-[150px] block">
+                      {user?.name}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('topup')}
+                    className="bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 shadow-lg shadow-primary/20 flex items-center gap-1.5 active:scale-95 cursor-pointer border-0"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Isi Saldo
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Announcements */}
+            <div className="lg:col-span-2 bg-white rounded-2xl border border-border p-6 shadow-sm flex flex-col justify-between">
+              <div>
+                <h2 className="text-xs font-bold text-foreground/80 font-heading uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <span>📢</span> Pengumuman Terbaru
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {announcements.slice(0, 2).map((ann) => {
+                    let alertThemeClass = '';
+                    let icon = '💡';
+                    switch (ann.type) {
+                      case 'success':
+                        alertThemeClass = 'bg-success/5 border-success/20 text-success';
+                        icon = '✅';
+                        break;
+                      case 'warning':
+                        alertThemeClass = 'bg-warning/5 border-warning/20 text-warning';
+                        icon = '⚠️';
+                        break;
+                      case 'danger':
+                        alertThemeClass = 'bg-error/5 border-error/20 text-error';
+                        icon = '🚨';
+                        break;
+                      default:
+                        alertThemeClass = 'bg-primary/5 border-primary/20 text-primary';
+                        icon = '📢';
+                    }
+
+                    return (
+                      <div
+                        key={ann.id}
+                        className={`relative overflow-hidden rounded-2xl border p-4.5 transition-all duration-300 hover:shadow-md ${alertThemeClass} flex gap-3.5 items-start`}
+                      >
+                        <div className="text-lg shrink-0 select-none mt-0.5">{icon}</div>
+                        <div className="space-y-1 w-full min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {ann.type_label && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-current/10 font-sans leading-none">
+                                {ann.type_label}
+                              </span>
+                            )}
+                            <span className="text-[10px] opacity-60 font-semibold font-mono text-foreground/50">
+                              {new Date(ann.created_at).toLocaleDateString('id-ID', {
+                                month: 'short',
+                                day: 'numeric',
+                              })}
+                            </span>
+                          </div>
+                          <h3 className="font-extrabold text-foreground text-xs font-heading leading-snug">
+                            {ann.title}
+                          </h3>
+                          {ann.subtitle && (
+                            <p className="text-[11px] text-foreground/75 leading-relaxed font-medium line-clamp-2">
+                              {ann.subtitle}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Left: Card Saldo Utama (Opaque max-w-md if no announcements) */
+          <div className="max-w-md relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border border-slate-800 p-6 shadow-xl text-white flex flex-col justify-between min-h-[220px]">
             {/* Background elements */}
             <div className="absolute top-0 right-0 w-36 h-36 bg-primary/20 rounded-full blur-2xl -mr-10 -mt-10" />
             <div className="absolute bottom-0 left-0 w-24 h-24 bg-purple-500/10 rounded-full blur-xl -ml-6 -mb-6" />
 
-            <div className="relative flex flex-col h-full justify-between min-h-[160px]">
+            <div className="relative flex flex-col h-full justify-between">
               <div>
                 <div className="flex justify-between items-center mb-6">
-                  <span className="text-xs font-bold tracking-widest text-slate-400 uppercase">{webName.split(' ')[0] || 'YOI'} E-Wallet</span>
+                  <span className="text-xs font-bold tracking-widest text-slate-400 uppercase">{(webName || '').split(' ')[0] || 'YOI'} E-WALLET</span>
                   {/* Decorative credit card chip */}
                   <div className="w-10 h-7 rounded bg-amber-500/80 opacity-90 relative overflow-hidden flex items-center justify-center">
                     <div className="absolute inset-0 border border-amber-600/30 grid grid-cols-3 grid-rows-3" />
@@ -515,136 +691,72 @@ export default function UserDashboard() {
               </div>
             </div>
           </div>
+        )}
 
-          {/* Dynamic Layanan Card (Categories & Brands) */}
-          <div className="bg-white rounded-2xl border border-border p-6 shadow-sm transition-all duration-300">
-            {selectedCategory === null ? (
-              <div>
-                <h2 className="text-sm font-bold text-foreground/80 font-heading mb-4 uppercase tracking-wider">Layanan {webName}</h2>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-                  {CATEGORIES.map((cat) => (
-                    <button
-                      key={cat.id}
-                      onClick={() => setSelectedCategory(cat.id)}
-                      className="flex flex-col items-center justify-center p-5 rounded-2xl border border-slate-100 hover:border-primary/30 hover:bg-primary-light/10 transition-all text-center group cursor-pointer"
-                    >
-                      <div className={`w-12 h-12 rounded-full ${cat.color} flex items-center justify-center mb-3 text-2xl group-hover:scale-110 transition-transform shadow-sm`}>
-                        {cat.icon}
-                      </div>
-                      <span className="text-xs font-extrabold text-slate-700 font-heading">{cat.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div>
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+        {/* Dynamic Layanan Card (Categories & Brands) */}
+        <div className="bg-white rounded-2xl border border-border p-6 shadow-sm transition-all duration-300">
+          {selectedCategory === null ? (
+            <div>
+              <h2 className="text-sm font-bold text-foreground/80 font-heading mb-4 uppercase tracking-wider">Layanan {webName}</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+                {CATEGORIES.map((cat) => (
                   <button
-                    onClick={() => setSelectedCategory(null)}
-                    className="text-xs font-bold text-primary hover:text-primary-hover hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
+                    key={cat.id}
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className="flex flex-col items-center justify-center p-5 rounded-2xl border border-slate-100 hover:border-primary/30 hover:bg-primary-light/10 transition-all text-center group cursor-pointer"
                   >
-                    &larr; Kembali ke Kategori
-                  </button>
-                  <span className="text-xs font-extrabold text-foreground/45 font-heading uppercase tracking-wider">
-                    Kategori: {CATEGORIES.find(c => c.id === selectedCategory)?.name}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 max-h-[300px] overflow-y-auto pr-1">
-                  {filteredGames.length === 0 ? (
-                    <p className="col-span-full text-center py-8 text-slate-400 text-xs font-bold">
-                      Tidak ada brand aktif dalam kategori ini.
-                    </p>
-                  ) : (
-                    filteredGames.map((game) => (
-                      <Link
-                        key={game.id}
-                        href={`/game/${game.slug}`}
-                        className="flex items-center space-x-3 p-3.5 rounded-xl border border-slate-100 hover:border-primary/30 hover:bg-primary-light/5 transition-all group"
-                      >
-                        {/* Game Category Thumbnail */}
-                        {game.thumbnail ? (
-                          <img
-                            src={getAssetUrl(game.thumbnail)}
-                            alt={game.name}
-                            className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-xs group-hover:border-primary/30 transition-colors shrink-0"
-                          />
-                        ) : (
-                          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-slate-100 to-slate-200 text-slate-600 flex items-center justify-center text-xs font-bold shrink-0 uppercase tracking-tight group-hover:from-primary/10 group-hover:to-primary/20 group-hover:text-primary transition-colors">
-                            {game.code.slice(0, 3)}
-                          </div>
-                        )}
-                        <span className="text-xs font-bold text-slate-700 truncate leading-tight group-hover:text-primary transition-colors">
-                          {game.name}
-                        </span>
-                      </Link>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Announcements Section */}
-          {announcements.length > 0 && (
-            <div className="space-y-3.5 animate-in fade-in duration-500">
-              <h2 className="text-sm font-bold text-foreground/80 font-heading uppercase tracking-wider pl-1 flex items-center gap-2">
-                <span>📢</span> Pengumuman Terbaru
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {announcements.map((ann) => {
-                  let alertThemeClass = '';
-                  let icon = '💡';
-                  switch (ann.type) {
-                    case 'success':
-                      alertThemeClass = 'bg-success/5 border-success/20 text-success';
-                      icon = '✅';
-                      break;
-                    case 'warning':
-                      alertThemeClass = 'bg-warning/5 border-warning/20 text-warning';
-                      icon = '⚠️';
-                      break;
-                    case 'danger':
-                      alertThemeClass = 'bg-error/5 border-error/20 text-error';
-                      icon = '🚨';
-                      break;
-                    default:
-                      alertThemeClass = 'bg-primary/5 border-primary/20 text-primary';
-                      icon = '📢';
-                  }
-
-                  return (
-                    <div
-                      key={ann.id}
-                      className={`relative overflow-hidden rounded-2xl border p-5 transition-all duration-300 hover:shadow-md ${alertThemeClass} flex gap-4 items-start`}
-                    >
-                      <div className="text-xl shrink-0 select-none mt-0.5">{icon}</div>
-                      <div className="space-y-1 w-full min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {ann.type_label && (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-current/10 font-sans leading-none">
-                              {ann.type_label}
-                            </span>
-                          )}
-                          <span className="text-[10px] opacity-60 font-semibold font-mono text-foreground/50">
-                            {new Date(ann.created_at).toLocaleDateString('id-ID', {
-                              month: 'short',
-                              day: 'numeric',
-                            })}
-                          </span>
-                        </div>
-                        <h3 className="font-extrabold text-foreground text-sm font-heading leading-snug">
-                          {ann.title}
-                        </h3>
-                        {ann.subtitle && (
-                          <p className="text-xs text-foreground/75 leading-relaxed font-medium">
-                            {ann.subtitle}
-                          </p>
-                        )}
-                      </div>
+                    <div className={`w-12 h-12 rounded-full ${cat.color} flex items-center justify-center mb-3 text-2xl group-hover:scale-110 transition-transform shadow-sm`}>
+                      {cat.icon}
                     </div>
-                  );
-                })}
+                    <span className="text-xs font-extrabold text-slate-700 font-heading">{cat.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+                <button
+                  onClick={() => setSelectedCategory(null)}
+                  className="text-xs font-bold text-primary hover:text-primary-hover hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
+                >
+                  &larr; Kembali ke Kategori
+                </button>
+                <span className="text-xs font-extrabold text-foreground/45 font-heading uppercase tracking-wider">
+                  Kategori: {CATEGORIES.find(c => c.id === selectedCategory)?.name}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 max-h-[300px] overflow-y-auto pr-1">
+                {filteredGames.length === 0 ? (
+                  <p className="col-span-full text-center py-8 text-slate-400 text-xs font-bold">
+                    Tidak ada brand aktif dalam kategori ini.
+                  </p>
+                ) : (
+                  filteredGames.map((game) => (
+                    <Link
+                      key={game.id}
+                      href={`/game/${game.slug}`}
+                      className="flex items-center space-x-3 p-3.5 rounded-xl border border-slate-100 hover:border-primary/30 hover:bg-primary-light/5 transition-all group"
+                    >
+                      {/* Game Category Thumbnail */}
+                      {game.thumbnail ? (
+                        <img
+                          src={getAssetUrl(game.thumbnail)}
+                          alt={game.name}
+                          className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-xs group-hover:border-primary/30 transition-colors shrink-0"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-slate-100 to-slate-200 text-slate-600 flex items-center justify-center text-xs font-bold shrink-0 uppercase tracking-tight group-hover:from-primary/10 group-hover:to-primary/20 group-hover:text-primary transition-colors">
+                          {game.code.slice(0, 3)}
+                        </div>
+                      )}
+                      <span className="text-xs font-bold text-slate-700 truncate leading-tight group-hover:text-primary transition-colors">
+                        {game.name}
+                      </span>
+                    </Link>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -703,6 +815,7 @@ export default function UserDashboard() {
                 <th className="px-6 py-4">Harga</th>
                 <th className="px-6 py-4">Pembayaran</th>
                 <th className="px-6 py-4">Pengiriman</th>
+                <th className="px-6 py-4 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -768,6 +881,19 @@ export default function UserDashboard() {
                   </td>
                   <td className="px-6 py-4">
                     {getDeliveryStatusBadge(tx.delivery_status)}
+                  </td>
+                  <td className="px-6 py-4 text-center" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenNotaModal(tx)}
+                      className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 text-slate-600 hover:bg-primary-light hover:text-primary hover:border-primary/20 rounded-xl transition-all cursor-pointer inline-flex items-center justify-center gap-1 shadow-xs"
+                      title="Unduh Nota"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      <span className="text-[9px] font-bold uppercase tracking-wider hidden md:inline">Nota</span>
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -896,6 +1022,71 @@ export default function UserDashboard() {
             </form>
           </div>
         </div>
+      </div>
+    );
+  };
+
+  const renderBalanceHistoryTab = () => {
+    return (
+      <div className="bg-white rounded-2xl border border-border overflow-hidden shadow-sm animate-in fade-in duration-300">
+        <div className="p-5 border-b border-border">
+          <h2 className="text-base font-bold text-foreground font-heading">Riwayat Mutasi Saldo</h2>
+          <p className="text-[11px] text-foreground/45">Semua riwayat pengurangan dan penambahan saldo Anda</p>
+        </div>
+
+        {balanceHistories.length === 0 ? (
+          <div className="text-center py-10 px-4 text-slate-400 text-xs font-medium">
+            Belum ada riwayat mutasi saldo.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-border text-slate-500 font-bold uppercase tracking-wider">
+                  <th className="px-5 py-3">Tanggal</th>
+                  <th className="px-5 py-3">Tipe</th>
+                  <th className="px-5 py-3">Nominal</th>
+                  <th className="px-5 py-3">Keterangan</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {balanceHistories.map((hist) => (
+                  <tr key={hist.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-5 py-4 whitespace-nowrap text-slate-600 font-medium">
+                      {new Date(hist.created_at).toLocaleString('id-ID', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </td>
+                    <td className="px-5 py-4 whitespace-nowrap">
+                      {hist.type === 'addition' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
+                          Penambahan
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 uppercase">
+                          Pengurangan
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-5 py-4 whitespace-nowrap font-bold">
+                      {hist.type === 'addition' ? (
+                        <span className="text-emerald-600 font-extrabold">+ {formatPrice(hist.amount)}</span>
+                      ) : (
+                        <span className="text-rose-600 font-extrabold">- {formatPrice(hist.amount)}</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-4 text-slate-700 font-medium font-sans">
+                      {hist.description}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     );
   };
@@ -1664,411 +1855,553 @@ export default function UserDashboard() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-6 md:py-10 max-w-6xl">
-      {/* Alert Notifications */}
-      {successMsg && (
-        <div className="fixed bottom-5 right-5 left-5 sm:left-auto bg-success text-white px-5 py-4 rounded-xl shadow-2xl border border-success-hover flex items-center space-x-3 z-50 animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
-          <svg className="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-          </svg>
-          <span className="font-semibold text-xs leading-snug">{successMsg}</span>
-        </div>
-      )}
-      {error && (
-        <div className="fixed bottom-5 right-5 left-5 sm:left-auto bg-error text-white px-5 py-4 rounded-xl shadow-2xl border border-red-600 flex items-center space-x-3 z-50 animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
-          <svg className="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-          </svg>
-          <span className="font-semibold text-xs leading-snug">{error}</span>
-        </div>
-      )}
-
-      {/* Tabbed Sidebar Layout */}
-      <div className="flex flex-col md:flex-row gap-6 items-start">
-        {/* Navigation Sidebar */}
-        <aside className="w-full md:w-64 shrink-0 flex flex-col space-y-4">
-          
-          {/* Mobile Navigation Dropdown (Burger Style) */}
-          <div className="md:hidden w-full relative">
-            <button
-              type="button"
-              onClick={() => setMenuOpen(!menuOpen)}
-              className="w-full flex items-center justify-between bg-white border border-border px-4 py-3 rounded-xl shadow-sm text-xs font-bold text-foreground hover:bg-slate-50 transition-all cursor-pointer"
-            >
-              <div className="flex items-center space-x-2.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse" />
-                <span className="text-slate-400">Navigasi:</span>
-                <span className="text-primary font-black uppercase">
-                  {activeTab === 'dashboard' && 'Dashboard'}
-                  {activeTab === 'topup' && 'Isi Saldo'}
-                  {activeTab === 'transactions' && 'Riwayat Transaksi'}
-                  {activeTab === 'topup_history' && 'Riwayat Saldo'}
-                  {activeTab === 'profile' && 'Profil'}
-                  {activeTab === 'developer' && 'API Developer'}
-                  {activeTab === 'tickets' && 'Tiket Bantuan'}
-                </span>
-              </div>
-              <div className="flex items-center space-x-1.5 text-slate-500">
-                <svg className={`w-4 h-4 transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-            </button>
-
-            {menuOpen && (
-              <div className="absolute left-0 right-0 mt-1.5 bg-white border border-border rounded-xl shadow-xl z-30 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="p-1 space-y-1">
-                  {[
-                    { key: 'dashboard', name: 'Dashboard' },
-                    { key: 'topup', name: 'Isi Saldo' },
-                    { key: 'transactions', name: 'Riwayat Transaksi' },
-                    { key: 'topup_history', name: 'Riwayat Saldo' },
-                    { key: 'profile', name: 'Profil' },
-                    { key: 'developer', name: 'API Developer' },
-                    { key: 'tickets', name: 'Tiket Bantuan' }
-                  ].map((tab) => {
-                    const isSelected = activeTab === tab.key;
-                    return (
-                      <button
-                        key={tab.key}
-                        onClick={() => {
-                          setActiveTab(tab.key as any);
-                          setMenuOpen(false);
-                        }}
-                        className={`w-full flex items-center justify-between px-4 py-3 rounded-lg text-xs font-bold uppercase transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-primary/5 text-primary font-black'
-                            : 'text-slate-500 hover:text-foreground hover:bg-slate-50'
-                        }`}
-                      >
-                        <span>{tab.name}</span>
-                        {tab.key === 'tickets' && repliedTicketsCount > 0 && (
-                          <span className="w-4 h-4 bg-error text-white font-extrabold rounded-full flex items-center justify-center text-[9px] scale-95 shrink-0 animate-pulse">
-                            {repliedTicketsCount}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+    <div className="bg-slate-50 py-8 min-h-screen">
+      <div className="container mx-auto px-4 py-6 md:py-10 max-w-6xl">
+        {/* Alert Notifications */}
+        {successMsg && (
+          <div className="fixed bottom-5 right-5 left-5 sm:left-auto bg-success text-white px-5 py-4 rounded-xl shadow-2xl border border-success-hover flex items-center space-x-3 z-50 animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
+            <svg className="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            <span className="font-semibold text-xs leading-snug">{successMsg}</span>
           </div>
+        )}
+        {error && (
+          <div className="fixed bottom-5 right-5 left-5 sm:left-auto bg-error text-white px-5 py-4 rounded-xl shadow-2xl border border-red-600 flex items-center space-x-3 z-50 animate-in slide-in-from-bottom sm:slide-in-from-right duration-300">
+            <svg className="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            <span className="font-semibold text-xs leading-snug">{error}</span>
+          </div>
+        )}
 
-          {/* Desktop Navigation Sidebar */}
-          <div className="hidden md:flex flex-col space-y-1 bg-white p-3.5 rounded-2xl border border-border shadow-sm w-full font-heading">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`w-full flex items-center space-x-3 px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 border-t-0 border-r-0 border-b-0 text-left bg-transparent ${
-                activeTab === 'dashboard'
-                  ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
-                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
-              }`}
-            >
-              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-              </svg>
-              <span>Dashboard</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('topup')}
-              className={`w-full flex items-center space-x-3 px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 border-t-0 border-r-0 border-b-0 text-left bg-transparent ${
-                activeTab === 'topup'
-                  ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
-                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
-              }`}
-            >
-              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-              <span>Isi Saldo</span>
-            </button>
-
-            {/* Collapsible Riwayat Group */}
-            <div className="space-y-0.5">
+        {/* Tabbed Sidebar Layout */}
+        <div className="flex flex-col md:flex-row gap-6 items-start">
+          {/* Navigation Sidebar */}
+          <aside className="w-full md:w-64 shrink-0 flex flex-col space-y-4">
+            
+            {/* Mobile Navigation Dropdown (Burger Style) */}
+            <div className="md:hidden w-full relative">
               <button
-                onClick={() => setHistoryDropdownOpen(!historyDropdownOpen)}
-                className="w-full flex items-center justify-between px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-slate-50 text-slate-500 transition-all cursor-pointer bg-transparent border-0"
+                type="button"
+                onClick={() => setMenuOpen(!menuOpen)}
+                className="w-full flex items-center justify-between bg-white border border-border px-4 py-3 rounded-xl shadow-sm text-xs font-bold text-foreground hover:bg-slate-50 transition-all cursor-pointer"
+              >
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse" />
+                  <span className="text-slate-400">Navigasi:</span>
+                  <span className="text-primary font-black uppercase">
+                    {activeTab === 'dashboard' && 'Dashboard'}
+                    {activeTab === 'topup' && 'Isi Saldo'}
+                    {activeTab === 'transactions' && 'Riwayat Transaksi'}
+                    {activeTab === 'topup_history' && 'Riwayat Isi Saldo'}
+                    {activeTab === 'balance_history' && 'Riwayat Saldo'}
+                    {activeTab === 'profile' && 'Profil'}
+                    {activeTab === 'developer' && 'API Developer'}
+                    {activeTab === 'tickets' && 'Tiket Bantuan'}
+                  </span>
+                </div>
+                <div className="flex items-center space-x-1.5 text-slate-500">
+                  <svg className={`w-4 h-4 transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </button>
+
+              {menuOpen && (
+                <div className="absolute left-0 right-0 mt-1.5 bg-white border border-border rounded-xl shadow-xl z-30 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="p-1 space-y-1">
+                    {[
+                      { key: 'dashboard', name: 'Dashboard' },
+                      { key: 'topup', name: 'Isi Saldo' },
+                      { key: 'transactions', name: 'Riwayat Transaksi' },
+                      { key: 'topup_history', name: 'Riwayat Isi Saldo' },
+                      { key: 'balance_history', name: 'Riwayat Saldo' },
+                      { key: 'profile', name: 'Profil' },
+                      { key: 'developer', name: 'API Developer' },
+                      { key: 'tickets', name: 'Tiket Bantuan' }
+                    ].map((tab) => {
+                      const isSelected = activeTab === tab.key;
+                      return (
+                        <button
+                          key={tab.key}
+                          onClick={() => {
+                            setActiveTab(tab.key as any);
+                            setMenuOpen(false);
+                          }}
+                          className={`w-full flex items-center justify-between px-4 py-3 rounded-lg text-xs font-bold uppercase transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-primary/5 text-primary font-black'
+                              : 'text-slate-500 hover:text-foreground hover:bg-slate-50'
+                          }`}
+                        >
+                          <span>{tab.name}</span>
+                          {tab.key === 'tickets' && repliedTicketsCount > 0 && (
+                            <span className="w-4 h-4 bg-error text-white font-extrabold rounded-full flex items-center justify-center text-[9px] scale-95 shrink-0 animate-pulse">
+                              {repliedTicketsCount}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Desktop Navigation Sidebar */}
+            <div className="hidden md:flex flex-col space-y-1 bg-white p-3.5 rounded-2xl border border-border shadow-sm w-full font-heading">
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className={`w-full flex items-center space-x-3 px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 border-t-0 border-r-0 border-b-0 text-left bg-transparent ${
+                  activeTab === 'dashboard'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+                <span>Dashboard</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('topup')}
+                className={`w-full flex items-center space-x-3 px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 border-t-0 border-r-0 border-b-0 text-left bg-transparent ${
+                  activeTab === 'topup'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                <span>Isi Saldo</span>
+              </button>
+
+              {/* Collapsible Riwayat Group */}
+              <div className="space-y-0.5">
+                <button
+                  onClick={() => setHistoryDropdownOpen(!historyDropdownOpen)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-slate-50 text-slate-500 transition-all cursor-pointer bg-transparent border-0"
+                >
+                  <div className="flex items-center space-x-3">
+                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <span>Riwayat</span>
+                  </div>
+                  <svg
+                    className={`w-3.5 h-3.5 transition-transform duration-200 ${historyDropdownOpen ? 'transform rotate-180' : ''}`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {historyDropdownOpen && (
+                  <div className="pl-6 space-y-0.5 animate-in slide-in-from-top duration-200">
+                    <button
+                      onClick={() => setActiveTab('transactions')}
+                      className={`w-full flex items-center space-x-2 px-4 py-2 text-xs font-semibold rounded-lg text-left bg-transparent border-0 cursor-pointer ${
+                        activeTab === 'transactions'
+                          ? 'bg-primary/5 text-primary font-bold'
+                          : 'text-slate-400 hover:text-slate-700'
+                      }`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-current shrink-0" />
+                      <span>Riwayat Transaksi</span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('topup_history')}
+                      className={`w-full flex items-center space-x-2 px-4 py-2 text-xs font-semibold rounded-lg text-left bg-transparent border-0 cursor-pointer ${
+                        activeTab === 'topup_history'
+                          ? 'bg-primary/5 text-primary font-bold'
+                          : 'text-slate-400 hover:text-slate-700'
+                      }`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-current shrink-0" />
+                      <span>Riwayat Isi Saldo</span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('balance_history')}
+                      className={`w-full flex items-center space-x-2 px-4 py-2 text-xs font-semibold rounded-lg text-left bg-transparent border-0 cursor-pointer ${
+                        activeTab === 'balance_history'
+                          ? 'bg-primary/5 text-primary font-bold'
+                          : 'text-slate-400 hover:text-slate-700'
+                      }`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-current shrink-0" />
+                      <span>Riwayat Saldo</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={() => setActiveTab('profile')}
+                className={`w-full flex items-center space-x-3 px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 border-t-0 border-r-0 border-b-0 text-left bg-transparent ${
+                  activeTab === 'profile'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                <span>Profil</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('developer')}
+                className={`w-full flex items-center space-x-3 px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 border-t-0 border-r-0 border-b-0 text-left bg-transparent ${
+                  activeTab === 'developer'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span>API Developer</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('tickets')}
+                className={`w-full flex items-center justify-between px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 border-t-0 border-r-0 border-b-0 text-left bg-transparent ${
+                  activeTab === 'tickets'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
               >
                 <div className="flex items-center space-x-3">
                   <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
                   </svg>
-                  <span>Riwayat</span>
+                  <span>Tiket Bantuan</span>
                 </div>
-                <svg
-                  className={`w-3.5 h-3.5 transition-transform duration-200 ${historyDropdownOpen ? 'transform rotate-180' : ''}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-
-              {historyDropdownOpen && (
-                <div className="pl-6 space-y-0.5 animate-in slide-in-from-top duration-200">
-                  <button
-                    onClick={() => setActiveTab('transactions')}
-                    className={`w-full flex items-center space-x-2 px-4 py-2 text-xs font-semibold rounded-lg text-left bg-transparent border-0 cursor-pointer ${
-                      activeTab === 'transactions'
-                        ? 'bg-primary/5 text-primary font-bold'
-                        : 'text-slate-400 hover:text-slate-700'
-                    }`}
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-current shrink-0" />
-                    <span>Riwayat Transaksi</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('topup_history')}
-                    className={`w-full flex items-center space-x-2 px-4 py-2 text-xs font-semibold rounded-lg text-left bg-transparent border-0 cursor-pointer ${
-                      activeTab === 'topup_history'
-                        ? 'bg-primary/5 text-primary font-bold'
-                        : 'text-slate-400 hover:text-slate-700'
-                    }`}
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-current shrink-0" />
-                    <span>Riwayat Isi Saldo</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <button
-              onClick={() => setActiveTab('profile')}
-              className={`w-full flex items-center space-x-3 px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 border-t-0 border-r-0 border-b-0 text-left bg-transparent ${
-                activeTab === 'profile'
-                  ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
-                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
-              }`}
-            >
-              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              <span>Profil</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('developer')}
-              className={`w-full flex items-center space-x-3 px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 border-t-0 border-r-0 border-b-0 text-left bg-transparent ${
-                activeTab === 'developer'
-                  ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
-                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
-              }`}
-            >
-              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              <span>API Developer</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('tickets')}
-              className={`w-full flex items-center justify-between px-4 py-3 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 border-t-0 border-r-0 border-b-0 text-left bg-transparent ${
-                activeTab === 'tickets'
-                  ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
-                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
-              }`}
-            >
-              <div className="flex items-center space-x-3">
-                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
-                </svg>
-                <span>Tiket Bantuan</span>
-              </div>
-              {repliedTicketsCount > 0 && (
-                <span className="w-4 h-4 bg-error text-white font-extrabold rounded-full flex items-center justify-center text-[9px] scale-95 shrink-0 animate-pulse">
-                  {repliedTicketsCount}
-                </span>
-              )}
-            </button>
-          </div>
-        </aside>
-
-        {/* Main Content Pane */}
-        <main className="flex-grow w-full overflow-hidden">
-          {activeTab === 'dashboard' && renderDashboardTab()}
-          {activeTab === 'transactions' && renderTransactionsTab()}
-          {activeTab === 'topup' && renderTopupTab()}
-          {activeTab === 'topup_history' && renderTopupHistoryTab()}
-          {activeTab === 'profile' && renderProfileTab()}
-          {activeTab === 'developer' && renderDeveloperTab()}
-          {activeTab === 'tickets' && renderTicketsTab()}
-        </main>
-      </div>
-
-      {/* Instruction Modal Popup */}
-      {instructionModalRequest && (() => {
-        const totalPay = parseFloat(instructionModalRequest.amount) + (instructionModalRequest.unique_code || 0);
-        const method = instructionModalRequest.method || topupMethods.find(m => m.id === instructionModalRequest.topup_method_id);
-        return (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-            <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl border-t sm:border border-border overflow-hidden animate-in slide-in-from-bottom sm:zoom-in duration-300 max-h-[90vh] flex flex-col">
-              {/* Header */}
-              <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
-                <h3 className="text-base font-bold text-foreground font-heading">
-                  Petunjuk Transfer Pembayaran
-                </h3>
-                <button
-                  onClick={() => setInstructionModalRequest(null)}
-                  className="text-slate-400 hover:text-foreground focus:outline-none p-1 cursor-pointer"
-                >
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              {/* Body */}
-              <div className="p-5 overflow-y-auto flex-grow space-y-5 text-xs text-slate-600">
-                {/* Status indicator */}
-                <div className="flex justify-between items-center bg-slate-50 p-3.5 rounded-xl border border-slate-100">
-                  <span className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">ID Permintaan</span>
-                  <span className="font-mono text-slate-800 font-extrabold">REQ-{instructionModalRequest.id}</span>
-                </div>
-
-                {/* Previous balance if approved */}
-                {instructionModalRequest.status === 'approved' && instructionModalRequest.previous_balance !== undefined && instructionModalRequest.previous_balance !== null && (
-                  <div className="flex justify-between items-center bg-slate-50 p-3.5 rounded-xl border border-slate-100">
-                    <span className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">Saldo Sebelum Top-up</span>
-                    <span className="font-mono text-slate-800 font-extrabold">{formatPrice(instructionModalRequest.previous_balance)}</span>
-                  </div>
+                {repliedTicketsCount > 0 && (
+                  <span className="w-4 h-4 bg-error text-white font-extrabold rounded-full flex items-center justify-center text-[9px] scale-95 shrink-0 animate-pulse">
+                    {repliedTicketsCount}
+                  </span>
                 )}
+              </button>
+            </div>
+          </aside>
 
-                {/* Pay Amount Section */}
-                <div className="bg-primary/5 rounded-2xl border border-primary/10 p-5 text-center space-y-2 relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-16 h-16 bg-primary/10 rounded-full blur-xl -mr-6 -mt-6" />
-                  
-                  <div>
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Jumlah Harus Ditransfer</span>
-                    <span className="text-2xl font-extrabold text-primary font-heading block select-all tracking-wide">
-                      {formatPrice(totalPay)}
-                    </span>
-                  </div>
+          {/* Main Content Pane */}
+          <main className="flex-grow w-full overflow-hidden">
+            {activeTab === 'dashboard' && renderDashboardTab()}
+            {activeTab === 'transactions' && renderTransactionsTab()}
+            {activeTab === 'topup' && renderTopupTab()}
+            {activeTab === 'topup_history' && renderTopupHistoryTab()}
+            {activeTab === 'balance_history' && renderBalanceHistoryTab()}
+            {activeTab === 'profile' && renderProfileTab()}
+            {activeTab === 'developer' && renderDeveloperTab()}
+            {activeTab === 'tickets' && renderTicketsTab()}
+          </main>
+        </div>
 
-                  <div className="border-t border-slate-200/40 my-2 pt-2 grid grid-cols-2 gap-2 text-left">
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Nominal Dasar</span>
-                      <span className="font-semibold text-slate-700 text-xs">{formatPrice(instructionModalRequest.amount)}</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Kode Unik</span>
-                      <span className="font-bold text-amber-600 text-xs">+{instructionModalRequest.unique_code}</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-green-50 border border-green-100 rounded-xl p-2.5 text-center">
-                    <span className="text-[9px] font-bold text-green-700 uppercase tracking-wider block mb-0.5">Nominal Diterima (Masuk Saldo)</span>
-                    <span className="font-extrabold text-green-700 text-sm font-heading">{formatPrice(totalPay)}</span>
-                  </div>
-
-                  <div className="pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(totalPay.toString(), 'Nominal transfer')}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white border border-slate-200 text-[10px] font-bold text-slate-600 hover:bg-slate-50 transition-colors shadow-sm active:scale-95 cursor-pointer"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" />
-                      </svg>
-                      Salin Nominal
-                    </button>
-                  </div>
+        {/* Instruction Modal Popup */}
+        {instructionModalRequest && (() => {
+          const totalPay = parseFloat(instructionModalRequest.amount) + (instructionModalRequest.unique_code || 0);
+          const method = instructionModalRequest.method || topupMethods.find(m => m.id === instructionModalRequest.topup_method_id);
+          return (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+              <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl border-t sm:border border-border overflow-hidden animate-in slide-in-from-bottom sm:zoom-in duration-300 max-h-[90vh] flex flex-col">
+                {/* Header */}
+                <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
+                  <h3 className="text-base font-bold text-foreground font-heading">
+                    Petunjuk Transfer Pembayaran
+                  </h3>
+                  <button
+                    onClick={() => setInstructionModalRequest(null)}
+                    className="text-slate-400 hover:text-foreground focus:outline-none p-1 cursor-pointer"
+                  >
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
 
-                {/* Transfer Destination details */}
-                {method ? (
-                  <div className="space-y-3">
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Rekening Tujuan Transfer</span>
-                    <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4.5 space-y-3.5 shadow-inner">
-                      <div className="flex justify-between items-center pb-2.5 border-b border-slate-200/50">
-                        <span className="text-slate-400">Provider / Bank</span>
-                        <span className="font-extrabold text-slate-800 text-xs uppercase">{method.name}</span>
-                      </div>
-                      <div className="flex justify-between items-center pb-2.5 border-b border-slate-200/50">
-                        <span className="text-slate-400">Nomor Rekening / VA</span>
-                        <div className="flex items-center space-x-2">
-                          <span className="font-mono font-black text-slate-900 text-sm tracking-wide select-all">{method.account_number}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleCopy(method.account_number, 'Nomor rekening')}
-                            className="text-primary hover:text-primary-hover p-1 cursor-pointer bg-transparent border-0"
-                            title="Salin nomor"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
+                {/* Body */}
+                <div className="p-5 overflow-y-auto flex-grow space-y-5 text-xs text-slate-600">
+                  {/* Status indicator */}
+                  <div className="flex justify-between items-center bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                    <span className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">ID Permintaan</span>
+                    <span className="font-mono text-slate-800 font-extrabold">REQ-{instructionModalRequest.id}</span>
+                  </div>
+
+                  {/* Previous balance if approved */}
+                  {instructionModalRequest.status === 'approved' && instructionModalRequest.previous_balance !== undefined && instructionModalRequest.previous_balance !== null && (
+                    <div className="flex justify-between items-center bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                      <span className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">Saldo Sebelum Top-up</span>
+                      <span className="font-mono text-slate-800 font-extrabold">{formatPrice(instructionModalRequest.previous_balance)}</span>
+                    </div>
+                  )}
+
+                  {/* Pay Amount Section */}
+                  <div className="bg-primary/5 rounded-2xl border border-primary/10 p-5 text-center space-y-2 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-16 h-16 bg-primary/10 rounded-full blur-xl -mr-6 -mt-6" />
+                    
+                    <div>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Jumlah Harus Ditransfer</span>
+                      <span className="text-2xl font-extrabold text-primary font-heading block select-all tracking-wide">
+                        {formatPrice(totalPay)}
+                      </span>
+                    </div>
+
+                    <div className="border-t border-slate-200/40 my-2 pt-2 grid grid-cols-2 gap-2 text-left">
                       <div className="flex justify-between items-center">
                         <span className="text-slate-400">Atas Nama (a.n)</span>
-                        <span className="font-bold text-slate-800 text-xs">{method.account_name}</span>
+                        <span className="font-bold text-slate-800 text-xs">{method?.account_name}</span>
                       </div>
                     </div>
                   </div>
-                ) : (
-                  <div className="p-3.5 bg-slate-50 border border-slate-100 rounded-xl text-center text-slate-400 italic">
-                    Data rekening metode transfer tidak ditemukan.
-                  </div>
-                )}
+                </div>
 
-                {/* Note alert warning */}
-                <div className="bg-amber-50 rounded-xl border border-amber-200/60 p-3.5 text-amber-800 flex items-start space-x-2.5 leading-relaxed">
-                  <svg className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                  <div>
-                    <p className="font-bold text-[10px] text-amber-900 uppercase tracking-wider mb-0.5">Penting!</p>
-                    <p>Harap transfer **TEPAT** sesuai nominal di atas hingga 3 digit terakhir. Perbedaan nominal transfer akan memperlambat atau menggagalkan proses verifikasi manual oleh administrator.</p>
-                  </div>
+                {/* Footer action */}
+                <div className="p-5 border-t border-border bg-slate-50/50 flex shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setInstructionModalRequest(null)}
+                    className="w-full py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider cursor-pointer border-0 active:scale-95 transition-all shadow-md shadow-slate-900/10"
+                  >
+                    Saya Mengerti
+                  </button>
                 </div>
               </div>
+            </div>
+          );
+        })()}
 
-              {/* Footer action */}
-              <div className="p-5 border-t border-border bg-slate-50/50 flex shrink-0">
+        {/* Transaction Detail Modal Popup */}
+        {selectedTransaction && (() => {
+          const tx = selectedTransaction;
+          return (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
+              <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl border-t sm:border border-border overflow-hidden animate-in slide-in-from-bottom sm:zoom-in duration-300 max-h-[90vh] flex flex-col">
+                {/* Header */}
+                <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
+                  <div>
+                    <h3 className="text-base font-bold text-foreground font-heading">
+                      Detail Transaksi
+                    </h3>
+                    <div className="flex items-center space-x-1.5 mt-0.5">
+                      <span className="text-[10px] text-foreground/40 font-mono block">{tx.invoice_id}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(tx.invoice_id, 'Nomor invoice')}
+                        className="text-primary hover:text-primary-hover p-0.5 cursor-pointer bg-transparent border-0 flex items-center justify-center"
+                        title="Salin Invoice ID"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedTransaction(null)}
+                    className="text-slate-400 hover:text-foreground focus:outline-none p-1 cursor-pointer"
+                  >
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Body */}
+                <div className="p-5 overflow-y-auto flex-grow space-y-5 text-xs text-slate-600">
+                  {/* Badges Status */}
+                  <div className="grid grid-cols-2 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <div>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Status Pembayaran</span>
+                      {getPaymentStatusBadge(tx.payment_status)}
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Status Pengiriman</span>
+                      {getDeliveryStatusBadge(tx.delivery_status)}
+                    </div>
+                  </div>
+
+                  {/* Game & Product Info */}
+                  <div className="space-y-3">
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Informasi Produk</span>
+                    <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4.5 space-y-3 shadow-inner">
+                      <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50">
+                        <span className="text-slate-400">Game</span>
+                        <span className="font-extrabold text-slate-800 text-xs text-right">{tx.game?.name || '-'}</span>
+                      </div>
+                      <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50">
+                        <span className="text-slate-400">Produk</span>
+                        <span className="font-bold text-slate-800 text-xs text-right">{tx.product?.name || '-'}</span>
+                      </div>
+                      <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50">
+                        <span className="text-slate-400">ID Tujuan</span>
+                        <span className="font-mono font-bold text-slate-800 text-xs text-right select-all">
+                          {tx.target_id} {tx.target_zone ? `(${tx.target_zone})` : ''}
+                        </span>
+                      </div>
+                      {tx.nickname && (
+                        <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50 text-emerald-600 dark:text-emerald-400">
+                          <span className="text-slate-400">Nickname Akun</span>
+                          <span className="font-extrabold text-xs text-right">{tx.nickname}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50">
+                        <span className="text-slate-400">Metode Bayar</span>
+                        <span className="font-bold text-slate-800 text-xs uppercase text-right">{tx.payment_method}</span>
+                      </div>
+                      <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50">
+                        <span className="text-slate-400">Tanggal</span>
+                        <span className="text-slate-700 text-[11px] text-right">
+                          {new Date(tx.created_at).toLocaleString('id-ID', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </span>
+                      </div>
+                      {tx.discount && parseFloat(tx.discount) > 0 ? (
+                        <>
+                          <div className="flex justify-between items-center pb-2.5 border-b border-slate-200/50">
+                            <span className="text-slate-400">Harga Item</span>
+                            <span className="font-bold text-slate-800 text-xs">{formatPrice(parseFloat(tx.amount) + parseFloat(tx.discount))}</span>
+                          </div>
+                          <div className="flex justify-between items-center pb-2.5 border-b border-slate-200/50 text-success">
+                            <span className="text-success">Potongan Voucher ({tx.voucher_code})</span>
+                            <span className="font-extrabold text-xs text-right">- {formatPrice(tx.discount)}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-400">Total Bayar</span>
+                            <span className="font-extrabold text-primary text-sm font-heading">{formatPrice(tx.amount)}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-400">Total Harga</span>
+                          <span className="font-extrabold text-primary text-sm font-heading">{formatPrice(tx.amount)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* SN / Notes Section */}
+                  {(tx.digiflazz_ref_id || tx.notes) && (
+                    <div className="space-y-3">
+                      <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Keterangan Provider</span>
+                      <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4.5 space-y-3.5 shadow-inner">
+                        {tx.digiflazz_ref_id && (
+                          <div className="flex justify-between items-center pb-2.5 border-b border-slate-200/50">
+                            <span className="text-slate-400">SN / Ref ID</span>
+                            <div className="flex items-center space-x-1.5">
+                              <span className="font-mono font-extrabold text-slate-800 text-xs select-all">{tx.digiflazz_ref_id}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleCopy(tx.digiflazz_ref_id || '', 'SN / Ref ID')}
+                                className="text-primary hover:text-primary-hover p-1 cursor-pointer bg-transparent border-0 flex items-center justify-center"
+                                title="Salin SN"
+                              >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {tx.notes && (
+                          <div className="flex flex-col space-y-1.5 text-left">
+                            <span className="text-slate-400">Catatan</span>
+                            <span className="font-medium text-slate-700 bg-white p-2.5 rounded-xl border border-slate-150 break-words leading-relaxed">
+                              {tx.notes}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer action */}
+                <div className="p-5 border-t border-border bg-slate-50/50 flex gap-3 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTransaction(null)}
+                    className="flex-1 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs uppercase tracking-wider cursor-pointer border-0 active:scale-95 transition-all text-center"
+                  >
+                    Tutup
+                  </button>
+                  <Link
+                    href={`/invoice/${tx.invoice_id}`}
+                    className="flex-1 py-3 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs uppercase tracking-wider cursor-pointer border-0 active:scale-95 transition-all text-center shadow-md shadow-primary/10 flex items-center justify-center"
+                  >
+                    Invoice &rarr;
+                  </Link>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Custom Confirmation Modal (No Emotes) */}
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-xs rounded-2xl shadow-2xl border border-border p-5 animate-in zoom-in-95 duration-200 text-center flex flex-col items-center">
+              {/* Visual Icon - Key SVG */}
+              <div className="w-12 h-12 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m-9 5a3 3 0 11-6 0 3 3 0 016 0zM19 9a3 3 0 11-6 0 3 3 0 016 0zM4 11h16m-2 4h.01M4 15h.01" />
+                </svg>
+              </div>
+              <h4 className="text-xs font-extrabold text-slate-800 font-heading mt-3 uppercase tracking-wider">
+                {confirmModal.title}
+              </h4>
+              <p className="text-[10px] text-slate-500 mt-2 leading-relaxed font-sans">
+                {confirmModal.message}
+              </p>
+              <div className="flex items-center justify-center space-x-2.5 mt-5 w-full">
                 <button
                   type="button"
-                  onClick={() => setInstructionModalRequest(null)}
-                  className="w-full py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider cursor-pointer border-0 active:scale-95 transition-all shadow-md shadow-slate-900/10"
+                  onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                  className="px-4 py-2.5 rounded-lg border border-slate-200 text-[10px] font-bold text-slate-500 hover:bg-slate-50 transition-all uppercase tracking-wider cursor-pointer flex-1 bg-transparent"
                 >
-                  Saya Mengerti
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmModal.onConfirm}
+                  className="px-4 py-2.5 rounded-lg bg-primary text-white text-[10px] font-bold hover:bg-primary-hover active:bg-primary-dark transition-all uppercase tracking-wider cursor-pointer flex-1 border-0"
+                >
+                  Setuju
                 </button>
               </div>
             </div>
           </div>
-        );
-      })()}
+        )}
+      </div>
 
-      {/* Transaction Detail Modal Popup */}
-      {selectedTransaction && (() => {
-        const tx = selectedTransaction;
+      {/* Nota Modal Popup (Cetak Struk) */}
+      {notaModalTransaction && (() => {
+        const tx = notaModalTransaction;
         return (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
-            <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl border-t sm:border border-border overflow-hidden animate-in slide-in-from-bottom sm:zoom-in duration-300 max-h-[90vh] flex flex-col">
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 font-sans">
+            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-border p-6 overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
+              
               {/* Header */}
-              <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4 shrink-0">
                 <div>
-                  <h3 className="text-base font-bold text-foreground font-heading">
-                    Detail Transaksi
+                  <h3 className="text-base font-bold text-foreground font-heading flex items-center gap-1.5">
+                    <span>📥 Buat & Unduh Nota Belanja</span>
                   </h3>
-                  <div className="flex items-center space-x-1.5 mt-0.5">
-                    <span className="text-[10px] text-foreground/40 font-mono block">{tx.invoice_id}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(tx.invoice_id, 'Nomor invoice')}
-                      className="text-primary hover:text-primary-hover p-0.5 cursor-pointer bg-transparent border-0 flex items-center justify-center"
-                      title="Salin Invoice ID"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" />
-                      </svg>
-                    </button>
-                  </div>
+                  <p className="text-[11px] text-slate-400 font-medium font-sans">Kustomisasi nama toko dan harga jual untuk pembeli Anda.</p>
                 </div>
                 <button
-                  onClick={() => setSelectedTransaction(null)}
+                  onClick={() => setNotaModalTransaction(null)}
                   className="text-slate-400 hover:text-foreground focus:outline-none p-1 cursor-pointer"
                 >
                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2077,176 +2410,131 @@ export default function UserDashboard() {
                 </button>
               </div>
 
-              {/* Body */}
-              <div className="p-5 overflow-y-auto flex-grow space-y-5 text-xs text-slate-600">
-                {/* Badges Status */}
-                <div className="grid grid-cols-2 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                  <div>
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Status Pembayaran</span>
-                    {getPaymentStatusBadge(tx.payment_status)}
-                  </div>
-                  <div>
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Status Pengiriman</span>
-                    {getDeliveryStatusBadge(tx.delivery_status)}
-                  </div>
-                </div>
+              {/* Scrollable Body */}
+              <div className="overflow-y-auto flex-grow pr-1 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Editor Forms */}
+                  <div className="space-y-4 text-xs">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-foreground/60 mb-1.5 tracking-wider">
+                        Nama Toko Anda
+                      </label>
+                      <input
+                        type="text"
+                        value={customShopName}
+                        onChange={(e) => handleShopNameChange(e.target.value)}
+                        placeholder={webName}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-sans font-medium"
+                      />
+                      <p className="text-[9px] text-slate-400 mt-1.5 leading-snug">
+                        Jika kosong, otomatis memakai nama default: <span className="font-semibold">{webName}</span>
+                      </p>
+                    </div>
 
-                {/* Game & Product Info */}
-                <div className="space-y-3">
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Informasi Produk</span>
-                  <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4.5 space-y-3 shadow-inner">
-                    <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50">
-                      <span className="text-slate-400">Game</span>
-                      <span className="font-extrabold text-slate-800 text-xs text-right">{tx.game?.name || '-'}</span>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-foreground/60 mb-1.5 tracking-wider">
+                        Harga Jual di Nota (Rp)
+                      </label>
+                      <input
+                        type="number"
+                        value={customPrice === '' ? '' : customPrice}
+                        onChange={(e) => setCustomPrice(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                        placeholder={tx.amount.toString()}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-sans font-bold"
+                      />
+                      <p className="text-[9px] text-slate-400 mt-1.5 leading-snug">
+                        Harga beli Anda: <span className="font-semibold">{formatPrice(tx.amount)}</span>
+                      </p>
                     </div>
-                    <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50">
-                      <span className="text-slate-400">Produk</span>
-                      <span className="font-bold text-slate-800 text-xs text-right">{tx.product?.name || '-'}</span>
-                    </div>
-                    <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50">
-                      <span className="text-slate-400">ID Tujuan</span>
-                      <span className="font-mono font-bold text-slate-800 text-xs text-right select-all">
-                        {tx.target_id} {tx.target_zone ? `(${tx.target_zone})` : ''}
-                      </span>
-                    </div>
-                    {tx.nickname && (
-                      <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50 text-emerald-600 dark:text-emerald-400">
-                        <span className="text-slate-400">Nickname Akun</span>
-                        <span className="font-extrabold text-xs text-right">{tx.nickname}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50">
-                      <span className="text-slate-400">Metode Bayar</span>
-                      <span className="font-bold text-slate-800 text-xs uppercase text-right">{tx.payment_method}</span>
-                    </div>
-                    <div className="flex justify-between items-start pb-2.5 border-b border-slate-200/50">
-                      <span className="text-slate-400">Tanggal</span>
-                      <span className="text-slate-700 text-[11px] text-right">
-                        {new Date(tx.created_at).toLocaleString('id-ID', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </span>
-                    </div>
-                    {tx.discount && parseFloat(tx.discount) > 0 ? (
-                      <>
-                        <div className="flex justify-between items-center pb-2.5 border-b border-slate-200/50">
-                          <span className="text-slate-400">Harga Item</span>
-                          <span className="font-bold text-slate-800 text-xs">{formatPrice(parseFloat(tx.amount) + parseFloat(tx.discount))}</span>
-                        </div>
-                        <div className="flex justify-between items-center pb-2.5 border-b border-slate-200/50 text-success">
-                          <span className="text-success">Potongan Voucher ({tx.voucher_code})</span>
-                          <span className="font-extrabold text-xs text-right">- {formatPrice(tx.discount)}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-slate-400">Total Bayar</span>
-                          <span className="font-extrabold text-primary text-sm font-heading">{formatPrice(tx.amount)}</span>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-400">Total Harga</span>
-                        <span className="font-extrabold text-primary text-sm font-heading">{formatPrice(tx.amount)}</span>
-                      </div>
-                    )}
                   </div>
-                </div>
 
-                {/* SN / Notes Section */}
-                {(tx.digiflazz_ref_id || tx.notes) && (
-                  <div className="space-y-3">
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Keterangan Provider</span>
-                    <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4.5 space-y-3.5 shadow-inner">
-                      {tx.digiflazz_ref_id && (
-                        <div className="flex justify-between items-center pb-2.5 border-b border-slate-200/50">
-                          <span className="text-slate-400">SN / Ref ID</span>
-                          <div className="flex items-center space-x-1.5">
-                            <span className="font-mono font-extrabold text-slate-800 text-xs select-all">{tx.digiflazz_ref_id}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleCopy(tx.digiflazz_ref_id || '', 'SN / Ref ID')}
-                              className="text-primary hover:text-primary-hover p-1 cursor-pointer bg-transparent border-0 flex items-center justify-center"
-                              title="Salin SN"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" />
-                              </svg>
-                            </button>
+                  {/* Live Preview Box */}
+                  <div className="flex flex-col items-center justify-center bg-slate-50/50 rounded-2xl p-4 border border-slate-100 dark:border-slate-800">
+                    <span className="text-[9px] uppercase font-bold text-foreground/45 mb-3 tracking-wider">Live Preview Struk (80mm)</span>
+                    
+                    <div ref={receiptRef} className="w-full max-w-[240px] bg-white text-black p-4 rounded-xl shadow-md border border-slate-200/60 font-mono text-[9px] leading-relaxed flex flex-col items-center">
+                      <div className="font-bold text-xs uppercase text-center tracking-tight leading-tight w-full break-words">
+                        {customShopName || webName}
+                      </div>
+                      <div className="text-[8px] text-slate-500 uppercase mt-0.5 text-center">Struk Pembelian Game</div>
+                      
+                      <div className="w-full border-t border-dashed border-slate-300 my-1.5" />
+                      
+                      <div className="w-full text-left space-y-0.5 text-[8px]">
+                        <div className="flex justify-between">
+                          <span>No. Invoice:</span>
+                          <span className="font-bold">{tx.invoice_id}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Tanggal:</span>
+                          <span>{new Date(tx.created_at).toLocaleDateString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Status:</span>
+                          <span className="font-bold text-emerald-600">{tx.payment_status === 'paid' ? 'LUNAS' : 'PENDING'}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="w-full border-t border-dashed border-slate-300 my-1.5" />
+                      
+                      <div className="w-full text-left space-y-0.5 text-[8px]">
+                        <div className="font-bold uppercase tracking-tight break-words">{tx.game?.name}</div>
+                        <div className="flex justify-between text-slate-600 pl-1.5">
+                          <span className="break-words">- {tx.product?.name}</span>
+                          <span className="shrink-0 ml-2">1x</span>
+                        </div>
+                        <div className="pl-1.5 text-slate-700">
+                          <span>ID: {tx.target_id} {tx.target_zone ? `(${tx.target_zone})` : ''}</span>
+                        </div>
+                        {tx.nickname && (
+                          <div className="pl-1.5 italic text-slate-500">
+                            <span>Nick: {tx.nickname}</span>
                           </div>
-                        </div>
-                      )}
-                      {tx.notes && (
-                        <div className="flex flex-col space-y-1.5 text-left">
-                          <span className="text-slate-400">Catatan</span>
-                          <span className="font-medium text-slate-700 bg-white p-2.5 rounded-xl border border-slate-150 break-words leading-relaxed">
-                            {tx.notes}
-                          </span>
-                        </div>
-                      )}
+                        )}
+                      </div>
+                      
+                      <div className="w-full border-t border-dashed border-slate-300 my-1.5" />
+                      
+                      <div className="w-full flex justify-between font-bold text-[10px] pt-0.5">
+                        <span>TOTAL:</span>
+                        <span>{formatPrice(customPrice || 0)}</span>
+                      </div>
+                      
+                      <div className="w-full border-t border-dashed border-slate-300 my-1.5" />
+                      
+                      <div className="text-[8px] text-slate-500 uppercase mt-0.5 font-bold">Terima Kasih</div>
+                      <div className="text-[7px] text-slate-400 text-center">Struk ini adalah bukti pembayaran sah</div>
                     </div>
                   </div>
-                )}
+                </div>
               </div>
 
-              {/* Footer action */}
-              <div className="p-5 border-t border-border bg-slate-50/50 flex gap-3 shrink-0">
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 border-t border-slate-100 pt-4 mt-4 shrink-0 font-sans">
                 <button
                   type="button"
-                  onClick={() => setSelectedTransaction(null)}
-                  className="flex-1 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs uppercase tracking-wider cursor-pointer border-0 active:scale-95 transition-all text-center"
+                  onClick={() => setNotaModalTransaction(null)}
+                  className="flex-1 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs uppercase tracking-wider cursor-pointer border-0 transition-all text-center"
                 >
                   Tutup
                 </button>
-                <Link
-                  href={`/invoice/${tx.invoice_id}`}
-                  className="flex-1 py-3 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs uppercase tracking-wider cursor-pointer border-0 active:scale-95 transition-all text-center shadow-md shadow-primary/10 flex items-center justify-center"
+                <button
+                  type="button"
+                  onClick={downloadReceiptImage}
+                  disabled={downloadingImage}
+                  className="flex-1 py-3 rounded-xl bg-primary hover:bg-primary-hover disabled:bg-slate-200 text-white font-bold text-xs uppercase tracking-wider cursor-pointer border-0 transition-all text-center shadow-md shadow-primary/10 flex items-center justify-center gap-1.5"
                 >
-                  Invoice &rarr;
-                </Link>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  <span>{downloadingImage ? 'Mengunduh...' : 'Unduh Gambar Nota (PNG)'}</span>
+                </button>
               </div>
             </div>
           </div>
         );
       })()}
 
-      {/* Custom Confirmation Modal (No Emotes) */}
-      {confirmModal.isOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-xs rounded-2xl shadow-2xl border border-border p-5 animate-in zoom-in-95 duration-200 text-center flex flex-col items-center">
-            {/* Visual Icon - Key SVG */}
-            <div className="w-12 h-12 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m-9 5a3 3 0 11-6 0 3 3 0 016 0zM19 9a3 3 0 11-6 0 3 3 0 016 0zM4 11h16m-2 4h.01M4 15h.01" />
-              </svg>
-            </div>
-            <h4 className="text-xs font-extrabold text-slate-800 font-heading mt-3 uppercase tracking-wider">
-              {confirmModal.title}
-            </h4>
-            <p className="text-[10px] text-slate-500 mt-2 leading-relaxed font-sans">
-              {confirmModal.message}
-            </p>
-            <div className="flex items-center justify-center space-x-2.5 mt-5 w-full">
-              <button
-                type="button"
-                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-                className="px-4 py-2.5 rounded-lg border border-slate-200 text-[10px] font-bold text-slate-500 hover:bg-slate-50 transition-all uppercase tracking-wider cursor-pointer flex-1 bg-transparent"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={confirmModal.onConfirm}
-                className="px-4 py-2.5 rounded-lg bg-primary text-white text-[10px] font-bold hover:bg-primary-hover active:bg-primary-dark transition-all uppercase tracking-wider cursor-pointer flex-1 border-0"
-              >
-                Setuju
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

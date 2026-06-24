@@ -189,19 +189,19 @@ body {
   color: var(--slate-500) !important;
 }
 .dark .text-slate-400 {
-  color: var(--slate-400) !important;
+  color: var(--slate-600) !important;
 }
 .dark .text-slate-300 {
-  color: var(--slate-300) !important;
+  color: var(--slate-700) !important;
 }
 .dark .text-slate-200 {
-  color: var(--slate-200) !important;
+  color: var(--slate-800) !important;
 }
 .dark .text-slate-100 {
-  color: var(--slate-100) !important;
+  color: var(--slate-900) !important;
 }
 .dark .text-slate-50 {
-  color: var(--slate-50) !important;
+  color: var(--slate-900) !important;
 }
 .dark .text-foreground {
   color: var(--foreground) !important;
@@ -246,6 +246,9 @@ body {
 }
 .dark .bg-slate-50\/50 {
   background-color: rgba(19, 27, 46, 0.5) !important;
+}
+.dark .bg-slate-50\/30 {
+  background-color: rgba(19, 27, 46, 0.3) !important;
 }
 .dark .bg-slate-100\/70 {
   background-color: rgba(30, 41, 59, 0.5) !important;
@@ -394,3 +397,4 @@ body {
   -ms-overflow-style: none;  /* IE and Edge */
   scrollbar-width: none;  /* Firefox */
 }
+

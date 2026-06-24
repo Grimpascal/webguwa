@@ -73,7 +73,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     try {
       const { rememberMe, ...loginPayload } = credentials;
-      const res = await api.login(loginPayload);
+      const res = await api.login({
+        ...loginPayload,
+        remember_me: rememberMe
+      });
       if (res.success && res.data) {
         const { token: userToken, user: userData } = res.data;
         if (rememberMe) {

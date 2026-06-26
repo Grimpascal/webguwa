@@ -1,12 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { api } from '@/services/api';
+
+declare global {
+  interface Window {
+    turnstile?: any;
+    google?: any;
+  }
+}
 
 export default function LoginPage() {
-  const { login, isAuthenticated, isAdmin, loading } = useAuth();
+  const { login, loginWithGoogle, isAuthenticated, isAdmin, loading } = useAuth();
   const router = useRouter();
 
   const [email, setEmail] = useState('');
@@ -15,6 +23,16 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Turnstile state
+  const [turnstileEnabled, setTurnstileEnabled] = useState(false);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const turnstileContainerRef = useRef<HTMLDivElement>(null);
+
+  // Google login state
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [googleClientId, setGoogleClientId] = useState('');
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -27,6 +45,140 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, isAdmin, router]);
 
+  // Fetch Turnstile and Google settings
+  useEffect(() => {
+    api.getPublicSettings()
+      .then((settings) => {
+        if (settings.turnstile_enabled && settings.turnstile_site_key) {
+          setTurnstileEnabled(true);
+          setTurnstileSiteKey(settings.turnstile_site_key);
+        }
+        if (settings.google_login_enabled && settings.google_client_id) {
+          setGoogleEnabled(true);
+          setGoogleClientId(settings.google_client_id);
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  // Render Turnstile widget dynamically
+  useEffect(() => {
+    if (!turnstileEnabled || !turnstileSiteKey) return;
+
+    if (!document.getElementById('cloudflare-turnstile-script')) {
+      const script = document.createElement('script');
+      script.id = 'cloudflare-turnstile-script';
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.async = true;
+      script.defer = true;
+      document.body.appendChild(script);
+    }
+
+    const renderWidget = () => {
+      if (window.turnstile && turnstileContainerRef.current) {
+        try {
+          window.turnstile.render(turnstileContainerRef.current, {
+            sitekey: turnstileSiteKey,
+            callback: (token: string) => {
+              setTurnstileToken(token);
+            },
+            'expired-callback': () => {
+              setTurnstileToken('');
+            },
+            'error-callback': () => {
+              setTurnstileToken('');
+            },
+          });
+        } catch (e) {
+          console.error('Turnstile render failed', e);
+        }
+      }
+    };
+
+    if (window.turnstile) {
+      renderWidget();
+    } else {
+      const checkInterval = setInterval(() => {
+        if (window.turnstile) {
+          renderWidget();
+          clearInterval(checkInterval);
+        }
+      }, 100);
+      return () => clearInterval(checkInterval);
+    }
+
+    return () => {
+      if (window.turnstile && turnstileContainerRef.current) {
+        try {
+          window.turnstile.remove(turnstileContainerRef.current);
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+  }, [turnstileEnabled, turnstileSiteKey]);
+
+  // Load Google SDK and initialize
+  useEffect(() => {
+    if (!googleEnabled || !googleClientId) return;
+
+    if (!document.getElementById('google-gsi-script')) {
+      const script = document.createElement('script');
+      script.id = 'google-gsi-script';
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.defer = true;
+      document.body.appendChild(script);
+    }
+
+    const initGoogleSignIn = () => {
+      if (window.google?.accounts?.id) {
+        try {
+          window.google.accounts.id.initialize({
+            client_id: googleClientId,
+            callback: async (response: any) => {
+              setError('');
+              setSubmitting(true);
+              try {
+                await loginWithGoogle(response.credential, rememberMe);
+              } catch (err: any) {
+                console.error(err);
+                setError(err.message || 'Gagal login menggunakan Google.');
+              } finally {
+                setSubmitting(false);
+              }
+            },
+          });
+
+          const buttonParent = document.getElementById('googleButtonDiv');
+          if (buttonParent) {
+            window.google.accounts.id.renderButton(buttonParent, {
+              theme: 'outline',
+              size: 'large',
+              width: 380,
+              text: 'signin_with',
+              shape: 'rectangular',
+            });
+          }
+        } catch (e) {
+          console.error('Google Sign-In initialization failed', e);
+        }
+      }
+    };
+
+    if (window.google?.accounts?.id) {
+      initGoogleSignIn();
+    } else {
+      const checkInterval = setInterval(() => {
+        if (window.google?.accounts?.id) {
+          initGoogleSignIn();
+          clearInterval(checkInterval);
+        }
+      }, 100);
+      return () => clearInterval(checkInterval);
+    }
+  }, [googleEnabled, googleClientId, rememberMe, loginWithGoogle]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
@@ -34,14 +186,28 @@ export default function LoginPage() {
       return;
     }
 
+    if (turnstileEnabled && !turnstileToken) {
+      setError('Harap selesaikan verifikasi keamanan (Turnstile)');
+      return;
+    }
+
     setError('');
     setSubmitting(true);
 
     try {
-      await login({ email, password, rememberMe });
+      await login({ email, password, rememberMe, turnstileToken });
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Email atau password salah. Silakan coba lagi.');
+      // Reset Turnstile token on failure so the user has to solve it again
+      if (window.turnstile && turnstileContainerRef.current) {
+        try {
+          window.turnstile.reset(turnstileContainerRef.current);
+          setTurnstileToken('');
+        } catch (e) {
+          // ignore
+        }
+      }
     } finally {
       setSubmitting(false);
     }
@@ -140,6 +306,13 @@ export default function LoginPage() {
                 <span className="font-semibold">Ingat Saya</span>
               </label>
             </div>
+
+            {/* Turnstile Container */}
+            {turnstileEnabled && turnstileSiteKey && (
+              <div className="flex justify-center py-2 animate-in fade-in duration-300">
+                <div ref={turnstileContainerRef} />
+              </div>
+            )}
           </div>
 
           <div>
@@ -163,6 +336,18 @@ export default function LoginPage() {
           </div>
         </form>
 
+        {googleEnabled && (
+          <div className="space-y-4 pt-2">
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-slate-200"></div>
+              <span className="flex-shrink mx-4 text-slate-400 text-xs font-semibold uppercase tracking-wider">Atau masuk dengan</span>
+              <div className="flex-grow border-t border-slate-200"></div>
+            </div>
+            <div className="flex justify-center">
+              <div id="googleButtonDiv" className="w-full flex justify-center min-h-[44px]" />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

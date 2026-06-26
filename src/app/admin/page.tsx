@@ -6,7 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { api, Transaction, AdminStats, User, TopupMethod, TopupRequest, Voucher, Announcement, Game, getAssetUrl, Ticket, TicketMessage, BalanceHistory } from '@/services/api';
 import Link from 'next/link';
 
-type TabType = 'summary' | 'users' | 'products' | 'settings' | 'topup_requests' | 'topup_methods' | 'games' | 'web_settings' | 'vouchers' | 'announcements' | 'flash_sales' | 'digiflazz_topup' | 'tickets' | 'midtrans';
+type TabType = 'summary' | 'users' | 'products' | 'settings' | 'topup_requests' | 'topup_methods' | 'games' | 'web_settings' | 'vouchers' | 'announcements' | 'flash_sales' | 'digiflazz_topup' | 'tickets' | 'midtrans' | 'turnstile' | 'google';
 
 const CATEGORIES = [
   { id: 'games', name: 'Game Voucher' },
@@ -84,7 +84,12 @@ export default function AdminDashboard() {
     midtrans_server_key: '',
     midtrans_client_key: '',
     midtrans_mode: 'sandbox',
-    midtrans_is_active: false
+    midtrans_is_active: false,
+    turnstile_enabled: false,
+    turnstile_site_key: '',
+    turnstile_secret_key: '',
+    google_login_enabled: false,
+    google_client_id: ''
   });
 
   const [brandLogo, setBrandLogo] = useState<string | null>(null);
@@ -315,7 +320,12 @@ export default function AdminDashboard() {
         midtrans_server_key: settingsData.midtrans_server_key || '',
         midtrans_client_key: settingsData.midtrans_client_key || '',
         midtrans_mode: settingsData.midtrans_mode || 'sandbox',
-        midtrans_is_active: settingsData.midtrans_is_active ?? false
+        midtrans_is_active: settingsData.midtrans_is_active ?? false,
+        turnstile_enabled: settingsData.turnstile_enabled ?? false,
+        turnstile_site_key: settingsData.turnstile_site_key || '',
+        turnstile_secret_key: settingsData.turnstile_secret_key || '',
+        google_login_enabled: settingsData.google_login_enabled ?? false,
+        google_client_id: settingsData.google_client_id || ''
       });
       setBrandLogo(publicSettingsData?.brand_logo || null);
       setFavicon(publicSettingsData?.favicon || null);
@@ -472,6 +482,44 @@ export default function AdminDashboard() {
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Gagal menyimpan konfigurasi.');
+    } finally {
+      setSettingsSubmitting(false);
+    }
+  };
+
+  // Turnstile Settings Save
+  const handleSaveTurnstileSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSettingsSubmitting(true);
+    try {
+      const res = await api.updateAdminSettings(settingsForm);
+      if (res.success) {
+        setSuccessMsg('Konfigurasi Cloudflare Turnstile berhasil disimpan.');
+      } else {
+        setError(res.message || 'Gagal menyimpan konfigurasi Turnstile.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Gagal menyimpan konfigurasi Turnstile.');
+    } finally {
+      setSettingsSubmitting(false);
+    }
+  };
+
+  // Google Settings Save
+  const handleSaveGoogleSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSettingsSubmitting(true);
+    try {
+      const res = await api.updateAdminSettings(settingsForm);
+      if (res.success) {
+        setSuccessMsg('Konfigurasi Google Login berhasil disimpan.');
+      } else {
+        setError(res.message || 'Gagal menyimpan konfigurasi Google.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Gagal menyimpan konfigurasi Google.');
     } finally {
       setSettingsSubmitting(false);
     }
@@ -2827,6 +2875,8 @@ export default function AdminDashboard() {
                   {activeTab === 'products' && 'Produk'}
                   {activeTab === 'settings' && 'API Config'}
                   {activeTab === 'midtrans' && 'Konfigurasi Midtrans'}
+                  {activeTab === 'turnstile' && 'Cloudflare Turnstile'}
+                  {activeTab === 'google' && 'Integrasi Google'}
                   {activeTab === 'digiflazz_topup' && 'Isi Saldo Digiflazz'}
                   {activeTab === 'topup_requests' && 'Persetujuan Topup'}
                   {activeTab === 'topup_methods' && 'Metode Transfer'}
@@ -2860,6 +2910,8 @@ export default function AdminDashboard() {
                     { key: 'topup_methods', name: 'Metode Transfer' },
                     { key: 'settings', name: 'API Config' },
                     { key: 'midtrans', name: 'Konfigurasi Midtrans' },
+                    { key: 'turnstile', name: 'Cloudflare Turnstile' },
+                    { key: 'google', name: 'Integrasi Google' },
                     { key: 'digiflazz_topup', name: 'Isi Saldo Digiflazz' },
                     { key: 'web_settings', name: 'Identitas Web' },
                     { key: 'tickets', name: 'Tiket Bantuan' }
@@ -3116,6 +3168,41 @@ export default function AdminDashboard() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                 </svg>
                 <span>Konfigurasi Midtrans</span>
+              </button>
+            </div>
+
+            {/* Group: Keamanan */}
+            <div className="space-y-1">
+              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-3 mb-1.5 block">
+                Keamanan
+              </span>
+              
+              <button
+                onClick={() => setActiveTab('turnstile')}
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                  activeTab === 'turnstile'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+                <span>Cloudflare Turnstile</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('google')}
+                className={`w-[calc(100%-0.75rem)] ml-3 flex items-center space-x-3 px-4 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer border-l-4 ${
+                  activeTab === 'google'
+                    ? 'bg-primary/5 text-primary border-primary font-extrabold pl-3'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-transparent'
+                }`}
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                </svg>
+                <span>Integrasi Google</span>
               </button>
             </div>
 
@@ -3665,39 +3752,48 @@ export default function AdminDashboard() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {selectedBalanceHistories.map((hist) => (
-                            <tr key={hist.id} className="hover:bg-slate-50/50 transition-colors">
-                              <td className="px-4 py-4 whitespace-nowrap text-slate-500 font-medium">
-                                {new Date(hist.created_at).toLocaleString('id-ID', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
-                              </td>
-                              <td className="px-4 py-4 whitespace-nowrap">
-                                {hist.type === 'addition' ? (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
-                                    Penambahan
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200 uppercase">
-                                    Pengurangan
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-4 py-4 whitespace-nowrap font-bold">
-                                {hist.type === 'addition' ? (
-                                  <span className="text-emerald-600 font-extrabold">+ {formatPrice(hist.amount)}</span>
-                                ) : (
-                                  <span className="text-rose-600 font-extrabold">- {formatPrice(hist.amount)}</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-4 text-slate-700 font-medium font-sans">
-                                {hist.description}
-                              </td>
-                            </tr>
-                          ))}
+                          {selectedBalanceHistories.map((hist) => {
+                            const isRefund = hist.type === 'refund' || hist.description.toLowerCase().includes('pengembalian dana');
+                            return (
+                              <tr key={hist.id} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="px-4 py-4 whitespace-nowrap text-slate-500 font-medium">
+                                  {new Date(hist.created_at).toLocaleString('id-ID', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </td>
+                                <td className="px-4 py-4 whitespace-nowrap">
+                                  {isRefund ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200 uppercase">
+                                      Refund
+                                    </span>
+                                  ) : hist.type === 'addition' ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
+                                      Penambahan
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200 uppercase">
+                                      Pengurangan
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-4 whitespace-nowrap font-bold">
+                                  {isRefund ? (
+                                    <span className="text-blue-600 font-extrabold">+ {formatPrice(hist.amount)}</span>
+                                  ) : hist.type === 'addition' ? (
+                                    <span className="text-emerald-600 font-extrabold">+ {formatPrice(hist.amount)}</span>
+                                  ) : (
+                                    <span className="text-rose-600 font-extrabold">- {formatPrice(hist.amount)}</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-4 text-slate-700 font-medium font-sans">
+                                  {hist.description}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -4237,6 +4333,176 @@ export default function AdminDashboard() {
                 <span className="text-sm md:text-base font-mono font-bold text-foreground select-all break-all text-center">
                   {typeof window !== 'undefined' ? `${window.location.origin.replace('3000', '8000')}/api/webhooks/midtrans` : 'Memuat...'}
                 </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: CLOUDFLARE TURNSTILE */}
+      {activeTab === 'turnstile' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in duration-300 text-xs">
+          <div className="md:col-span-2 space-y-6">
+            <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm">
+              <h2 className="text-base md:text-lg font-bold text-foreground font-heading mb-5">Konfigurasi Cloudflare Turnstile</h2>
+              <form onSubmit={handleSaveTurnstileSettings} className="space-y-5">
+                <div>
+                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Status Proteksi Bot</label>
+                  <div
+                    onClick={() => setSettingsForm({ ...settingsForm, turnstile_enabled: !settingsForm.turnstile_enabled })}
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between cursor-pointer select-none transition-all hover:bg-slate-100/50 min-h-[42px]"
+                  >
+                    <span className="text-xs font-semibold text-foreground/80">
+                      {settingsForm.turnstile_enabled ? 'Aktif (Gunakan Turnstile)' : 'Non-Aktif (Sembunyikan)'}
+                    </span>
+                    <button
+                      type="button"
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        settingsForm.turnstile_enabled ? 'bg-primary' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          settingsForm.turnstile_enabled ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Turnstile Site Key</label>
+                  <input
+                    type="text"
+                    required={settingsForm.turnstile_enabled}
+                    value={settingsForm.turnstile_site_key}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, turnstile_site_key: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground placeholder-slate-400 font-semibold"
+                    placeholder="Masukkan Cloudflare Turnstile Site Key"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Turnstile Secret Key</label>
+                  <input
+                    type="password"
+                    required={settingsForm.turnstile_enabled}
+                    value={settingsForm.turnstile_secret_key}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, turnstile_secret_key: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground placeholder-slate-400 font-mono"
+                    placeholder="Masukkan Cloudflare Turnstile Secret Key"
+                  />
+                </div>
+
+                <div className="pt-1">
+                  <button
+                    type="submit"
+                    disabled={settingsSubmitting}
+                    className="glow-button px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider disabled:opacity-50 cursor-pointer"
+                  >
+                    {settingsSubmitting ? 'Menyimpan...' : 'Simpan Konfigurasi'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-6">
+            <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm flex flex-col space-y-4">
+              <div>
+                <h2 className="text-base md:text-lg font-bold text-foreground font-heading mb-1">Tentang Turnstile</h2>
+                <p className="text-xs text-foreground/45 leading-relaxed">
+                  Cloudflare Turnstile adalah alternatif reCAPTCHA gratis, ramah pengguna, dan menjaga privasi. Fitur ini memverifikasi bahwa pengunjung adalah manusia tanpa memberikan tantangan visual (puzzle) yang mengganggu.
+                </p>
+                <div className="mt-4 pt-3 border-t border-slate-100">
+                  <a
+                    href="https://dash.cloudflare.com/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-primary font-bold hover:underline"
+                  >
+                    Dapatkan Kunci Turnstile &rarr;
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: GOOGLE INTEGRATION */}
+      {activeTab === 'google' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in duration-300 text-xs">
+          <div className="md:col-span-2 space-y-6">
+            <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm">
+              <h2 className="text-base md:text-lg font-bold text-foreground font-heading mb-5">Integrasi Google Login</h2>
+              <form onSubmit={handleSaveGoogleSettings} className="space-y-5">
+                <div>
+                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Status Login Google</label>
+                  <div
+                    onClick={() => setSettingsForm({ ...settingsForm, google_login_enabled: !settingsForm.google_login_enabled })}
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between cursor-pointer select-none transition-all hover:bg-slate-100/50 min-h-[42px]"
+                  >
+                    <span className="text-xs font-semibold text-foreground/80">
+                      {settingsForm.google_login_enabled ? 'Aktif (Gunakan Login Google)' : 'Non-Aktif (Sembunyikan)'}
+                    </span>
+                    <button
+                      type="button"
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        settingsForm.google_login_enabled ? 'bg-primary' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          settingsForm.google_login_enabled ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-foreground/75 uppercase tracking-wider mb-2">Google Client ID</label>
+                  <input
+                    type="text"
+                    required={settingsForm.google_login_enabled}
+                    value={settingsForm.google_client_id}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, google_client_id: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 text-xs focus:outline-none border border-slate-200 focus:border-primary text-foreground placeholder-slate-400 font-semibold"
+                    placeholder="Masukkan Google Client ID"
+                  />
+                </div>
+
+                <div className="pt-1">
+                  <button
+                    type="submit"
+                    disabled={settingsSubmitting}
+                    className="glow-button px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider disabled:opacity-50 cursor-pointer"
+                  >
+                    {settingsSubmitting ? 'Menyimpan...' : 'Simpan Konfigurasi'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-6">
+            <div className="bg-white rounded-2xl border border-border p-5 md:p-6 shadow-sm flex flex-col space-y-4">
+              <div>
+                <h2 className="text-base md:text-lg font-bold text-foreground font-heading mb-1">Tentang Integrasi Google</h2>
+                <p className="text-xs text-foreground/45 leading-relaxed">
+                  Integrasi Google Login memungkinkan reseller/pengguna Anda untuk mendaftar atau masuk ke akun mereka hanya dengan satu klik menggunakan akun Google mereka. Hal ini meningkatkan konversi pendaftaran dan mempermudah pengalaman pengguna.
+                </p>
+                <div className="mt-4 pt-3 border-t border-slate-100">
+                  <a
+                    href="https://console.cloud.google.com/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-primary font-bold hover:underline"
+                  >
+                    Buka Google Cloud Console &rarr;
+                  </a>
+                </div>
               </div>
             </div>
           </div>

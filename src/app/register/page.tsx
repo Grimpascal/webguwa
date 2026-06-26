@@ -4,9 +4,16 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { api } from '@/services/api';
+
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
 
 export default function RegisterPage() {
-  const { register, isAuthenticated, loading } = useAuth();
+  const { register, loginWithGoogle, isAuthenticated, loading } = useAuth();
   const router = useRouter();
 
   const [name, setName] = useState('');
@@ -23,6 +30,83 @@ export default function RegisterPage() {
       router.push('/dashboard');
     }
   }, [isAuthenticated, router]);
+
+  // Google login configurations
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [googleClientId, setGoogleClientId] = useState('');
+
+  // Fetch Google settings
+  useEffect(() => {
+    api.getPublicSettings()
+      .then((settings) => {
+        if (settings.google_login_enabled && settings.google_client_id) {
+          setGoogleEnabled(true);
+          setGoogleClientId(settings.google_client_id);
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  // Load Google SDK and initialize
+  useEffect(() => {
+    if (!googleEnabled || !googleClientId) return;
+
+    if (!document.getElementById('google-gsi-script')) {
+      const script = document.createElement('script');
+      script.id = 'google-gsi-script';
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.defer = true;
+      document.body.appendChild(script);
+    }
+
+    const initGoogleSignUp = () => {
+      if (window.google?.accounts?.id) {
+        try {
+          window.google.accounts.id.initialize({
+            client_id: googleClientId,
+            callback: async (response: any) => {
+              setError('');
+              setSubmitting(true);
+              try {
+                await loginWithGoogle(response.credential, true);
+              } catch (err: any) {
+                console.error(err);
+                setError(err.message || 'Gagal daftar menggunakan Google.');
+              } finally {
+                setSubmitting(false);
+              }
+            },
+          });
+
+          const buttonParent = document.getElementById('googleSignUpButtonDiv');
+          if (buttonParent) {
+            window.google.accounts.id.renderButton(buttonParent, {
+              theme: 'outline',
+              size: 'large',
+              width: 380,
+              text: 'signup_with',
+              shape: 'rectangular',
+            });
+          }
+        } catch (e) {
+          console.error('Google Sign-Up initialization failed', e);
+        }
+      }
+    };
+
+    if (window.google?.accounts?.id) {
+      initGoogleSignUp();
+    } else {
+      const checkInterval = setInterval(() => {
+        if (window.google?.accounts?.id) {
+          initGoogleSignUp();
+          clearInterval(checkInterval);
+        }
+      }, 100);
+      return () => clearInterval(checkInterval);
+    }
+  }, [googleEnabled, googleClientId, loginWithGoogle]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -192,6 +276,19 @@ export default function RegisterPage() {
             </button>
           </div>
         </form>
+
+        {googleEnabled && (
+          <div className="space-y-4 pt-2">
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-slate-200"></div>
+              <span className="flex-shrink mx-4 text-slate-400 text-xs font-semibold uppercase tracking-wider">Atau daftar dengan</span>
+              <div className="flex-grow border-t border-slate-200"></div>
+            </div>
+            <div className="flex justify-center">
+              <div id="googleSignUpButtonDiv" className="w-full flex justify-center min-h-[44px]" />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

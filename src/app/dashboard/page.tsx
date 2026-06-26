@@ -1050,39 +1050,48 @@ export default function UserDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {balanceHistories.map((hist) => (
-                  <tr key={hist.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-5 py-4 whitespace-nowrap text-slate-600 font-medium">
-                      {new Date(hist.created_at).toLocaleString('id-ID', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </td>
-                    <td className="px-5 py-4 whitespace-nowrap">
-                      {hist.type === 'addition' ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
-                          Penambahan
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 uppercase">
-                          Pengurangan
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-5 py-4 whitespace-nowrap font-bold">
-                      {hist.type === 'addition' ? (
-                        <span className="text-emerald-600 font-extrabold">+ {formatPrice(hist.amount)}</span>
-                      ) : (
-                        <span className="text-rose-600 font-extrabold">- {formatPrice(hist.amount)}</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-4 text-slate-700 font-medium font-sans">
-                      {hist.description}
-                    </td>
-                  </tr>
-                ))}
+                {balanceHistories.map((hist) => {
+                  const isRefund = hist.type === 'refund' || hist.description.toLowerCase().includes('pengembalian dana');
+                  return (
+                    <tr key={hist.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-5 py-4 whitespace-nowrap text-slate-600 font-medium">
+                        {new Date(hist.created_at).toLocaleString('id-ID', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </td>
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        {isRefund ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 uppercase">
+                            Refund
+                          </span>
+                        ) : hist.type === 'addition' ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
+                            Penambahan
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 uppercase">
+                            Pengurangan
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 whitespace-nowrap font-bold">
+                        {isRefund ? (
+                          <span className="text-blue-600 font-extrabold">+ {formatPrice(hist.amount)}</span>
+                        ) : hist.type === 'addition' ? (
+                          <span className="text-emerald-600 font-extrabold">+ {formatPrice(hist.amount)}</span>
+                        ) : (
+                          <span className="text-rose-600 font-extrabold">- {formatPrice(hist.amount)}</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 text-slate-700 font-medium font-sans">
+                        {hist.description}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

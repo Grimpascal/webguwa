@@ -9,6 +9,7 @@ interface AuthContextType {
   token: string | null;
   loading: boolean;
   login: (credentials: any) => Promise<void>;
+  loginWithGoogle: (idToken: string, rememberMe: boolean) => Promise<void>;
   register: (userData: any) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -72,11 +73,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (credentials: any) => {
     setLoading(true);
     try {
-      const { rememberMe, ...loginPayload } = credentials;
+      const { rememberMe, turnstileToken, ...loginPayload } = credentials;
       const res = await api.login({
         ...loginPayload,
-        remember_me: rememberMe
+        remember_me: rememberMe,
+        turnstile_token: turnstileToken
       });
+      if (res.success && res.data) {
+        const { token: userToken, user: userData } = res.data;
+        if (rememberMe) {
+          localStorage.setItem('token', userToken);
+          localStorage.setItem('user', JSON.stringify(userData));
+        } else {
+          sessionStorage.setItem('token', userToken);
+          sessionStorage.setItem('user', JSON.stringify(userData));
+        }
+        setToken(userToken);
+        setUser(userData);
+        
+        // Redirect based on role
+        if (userData.role === 'admin') {
+          router.push('/admin');
+        } else {
+          router.push('/dashboard');
+        }
+      }
+    } catch (err) {
+      setLoading(false);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loginWithGoogle = async (idToken: string, rememberMe: boolean = false) => {
+    setLoading(true);
+    try {
+      const res = await api.googleLogin({ id_token: idToken, remember_me: rememberMe });
       if (res.success && res.data) {
         const { token: userToken, user: userData } = res.data;
         if (rememberMe) {
@@ -151,7 +184,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isAuthenticated = !!user;
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout, refreshUser, isAdmin, isAuthenticated }}>
+    <AuthContext.Provider value={{ user, token, loading, login, loginWithGoogle, register, logout, refreshUser, isAdmin, isAuthenticated }}>
       {children}
     </AuthContext.Provider>
   );

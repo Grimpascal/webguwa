@@ -106,7 +106,7 @@ export interface User {
 export interface BalanceHistory {
   id: number;
   user_id: number;
-  type: 'addition' | 'deduction';
+  type: 'addition' | 'deduction' | 'refund';
   amount: string;
   description: string;
   created_at: string;
@@ -248,6 +248,13 @@ export const api = {
 
   login: async (payload: any) => {
     return await fetchAPI('/api/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  googleLogin: async (payload: { id_token: string; remember_me?: boolean }) => {
+    return await fetchAPI('/api/auth/google', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -398,6 +405,10 @@ export const api = {
     midtrans_is_active?: boolean;
     midtrans_client_key?: string;
     midtrans_mode?: string;
+    turnstile_enabled?: boolean;
+    turnstile_site_key?: string;
+    google_login_enabled?: boolean;
+    google_client_id?: string;
   }> => {
     const res = await fetchAPI('/api/settings/public');
     return res.data;

@@ -1,36 +1,145 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# YOI Store — Frontend
 
-## Getting Started
+Frontend aplikasi **YOI Store**, platform top-up game online berbasis Next.js 16 + TypeScript + Tailwind CSS. Terhubung ke backend Laravel melalui REST API.
 
-First, run the development server:
+---
+
+## 🚀 Tech Stack
+
+| Teknologi | Versi |
+|---|---|
+| [Next.js](https://nextjs.org) | 16.2.9 |
+| [React](https://react.dev) | 19.2.4 |
+| [TypeScript](https://www.typescriptlang.org) | ^5 |
+| [Tailwind CSS](https://tailwindcss.com) | ^4 |
+
+---
+
+## ✨ Fitur
+
+### Publik
+- 🎮 Halaman daftar game dan produk top-up
+- 🛒 Checkout & pembayaran (Midtrans / transfer manual)
+- 🏷️ Validasi voucher diskon
+- 📢 Pengumuman/banner dinamis
+- 🔍 Cek status transaksi berdasarkan invoice
+
+### User (Setelah Login)
+- 🔐 Autentikasi (Register / Login / Google OAuth)
+- 👤 Profil & ganti password
+- 💰 Top-up saldo via transfer bank
+- 📋 Riwayat transaksi & riwayat saldo
+- 🎫 Support ticket (buat, balas, tutup)
+- 🔑 Generate API Key
+
+### Admin
+- 📊 Dashboard statistik (total penjualan, transaksi, user)
+- 🎮 Manajemen game (aktif/nonaktif, flash sale, thumbnail)
+- 📦 Manajemen produk (markup harga, bulk update, sync Digiflazz)
+- 👥 Manajemen user (CRUD, top-up manual, riwayat saldo)
+- 💳 Metode top-up & permintaan top-up
+- 🎟️ Manajemen voucher
+- 📣 Manajemen pengumuman
+- ⚙️ Pengaturan web (nama, logo, favicon, footer)
+- 🏦 Saldo & deposit Digiflazz
+- 🎫 Support ticket admin
+
+---
+
+## 📁 Struktur Direktori
+
+```
+src/
+├── app/                  # Next.js App Router (halaman)
+│   ├── admin/            # Halaman dashboard admin
+│   ├── dashboard/        # Halaman dashboard user
+│   ├── login/            # Halaman login
+│   ├── register/         # Halaman register
+│   └── ...
+├── context/
+│   └── AuthContext.tsx   # Context autentikasi global
+└── services/
+    └── api.ts            # Semua fungsi API & type definitions
+```
+
+---
+
+## ⚙️ Setup & Instalasi
+
+### 1. Clone repo
+
+```bash
+git clone https://github.com/Grimpascal/webguwa.git
+cd webguwa
+```
+
+### 2. Install dependencies
+
+```bash
+npm install
+```
+
+### 3. Konfigurasi environment
+
+Salin file `.env.example` menjadi `.env.local` dan sesuaikan:
+
+```bash
+cp .env.example .env.local
+```
+
+```env
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+```
+
+> Ganti `http://127.0.0.1:8000` dengan URL backend Laravel yang sesuai.
+
+### 4. Jalankan development server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Buka [http://localhost:3000](http://localhost:3000) di browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 📦 Scripts
 
-## Learn More
+| Perintah | Deskripsi |
+|---|---|
+| `npm run dev` | Jalankan development server |
+| `npm run build` | Build untuk production |
+| `npm run start` | Jalankan production server |
+| `npm run lint` | Lint kode |
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🔗 Koneksi ke Backend
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Frontend berkomunikasi dengan backend Laravel melalui REST API. Pastikan backend sudah berjalan dan `NEXT_PUBLIC_API_URL` sudah diisi dengan benar.
 
-## Deploy on Vercel
+Repositori backend: [YOI Backend](https://github.com/Grimpascal/webguwa)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 🚢 Deployment
+
+### Vercel (Rekomendasi)
+
+1. Push ke GitHub
+2. Connect repo di [vercel.com](https://vercel.com)
+3. Set environment variable `NEXT_PUBLIC_API_URL` di dashboard Vercel
+4. Deploy!
+
+### Manual (VPS/Server)
+
+```bash
+npm run build
+npm run start
+```
+
+---
+
+## 📄 Lisensi
+
+Private project. All rights reserved.

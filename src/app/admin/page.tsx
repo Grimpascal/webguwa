@@ -476,6 +476,7 @@ export default function AdminDashboard() {
       const res = await api.updateAdminSettings(settingsForm);
       if (res.success) {
         setSuccessMsg('Konfigurasi Midtrans berhasil disimpan.');
+        fetchAdminData();
       } else {
         setError(res.message || 'Gagal menyimpan konfigurasi.');
       }
@@ -495,6 +496,7 @@ export default function AdminDashboard() {
       const res = await api.updateAdminSettings(settingsForm);
       if (res.success) {
         setSuccessMsg('Konfigurasi Cloudflare Turnstile berhasil disimpan.');
+        fetchAdminData();
       } else {
         setError(res.message || 'Gagal menyimpan konfigurasi Turnstile.');
       }
@@ -514,6 +516,7 @@ export default function AdminDashboard() {
       const res = await api.updateAdminSettings(settingsForm);
       if (res.success) {
         setSuccessMsg('Konfigurasi Google Login berhasil disimpan.');
+        fetchAdminData();
       } else {
         setError(res.message || 'Gagal menyimpan konfigurasi Google.');
       }
